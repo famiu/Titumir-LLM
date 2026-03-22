@@ -9,34 +9,32 @@ model:
   name: "Qwen/Qwen3.5-9B"
   max_seq_length: 2048
 
-cpt:
+cpt_training:
   max_examples: 500000
   output_dir: "./checkpoints/cpt"
   checkpoint: "./checkpoints/cpt_final"
+  lora_r: 16
+  lora_alpha: 32
+  batch_size: 4
+  gradient_accumulation_steps: 4
 
-sft:
+sft_training:
   output_dir: "./checkpoints/sft"
   checkpoint: "./checkpoints/sft_final"
+  lora_r: 32
+  lora_alpha: 64
+  batch_size: 4
+  gradient_accumulation_steps: 4
 
-export:
-  path: "./export/titumir_9b"
-
-llm:
-  generation:
-    endpoint: "https://openrouter.ai/api/v1/chat/completions"
-    api_key_env: "OPENROUTER_API_KEY"
-    model: "CHANGE_ME"
-    temperature: 0.9
-    max_tokens: 4000
-  refinement:
-    endpoint: "https://openrouter.ai/api/v1/chat/completions"
-    api_key_env: "OPENROUTER_API_KEY"
-    model: "CHANGE_ME"
-    temperature: 0.1
-    max_tokens: 1000
-
-prompts:
-  generation: |
+generation:
+  endpoint: "https://openrouter.ai/api/v1/chat/completions"
+  api_key_env: "OPENROUTER_API_KEY"
+  model: "CHANGE_ME"
+  temperature: 0.9
+  max_tokens: 4000
+  batch_size: 20
+  batch_timeout: 120
+  prompt: |
     Generate {n} Facebook post + comment pairs for Bengali LLM training data.
 
     Each pair should be a realistic Bangladeshi Facebook interaction.
@@ -88,7 +86,15 @@ prompts:
 
     Output valid JSON array only. No preamble. No markdown fences.
 
-  refinement: |
+refinement:
+  endpoint: "https://openrouter.ai/api/v1/chat/completions"
+  api_key_env: "OPENROUTER_API_KEY"
+  model: "CHANGE_ME"
+  temperature: 0.1
+  max_tokens: 1000
+  batch_size: 40
+  batch_timeout: 120
+  prompt: |
     You are a data quality checker for a Bengali LLM training dataset.
     You will receive a batch of training examples, each with an index, a post, and a comment.
     Your job is to remove low quality examples while preserving stylistic diversity.
@@ -124,6 +130,10 @@ prompts:
         "4": "comment is completely generic with no relation to post content"
       }}
     }}
+
+export:
+  path: "./export/titumir_9b"
+  quantization_method: "q4_k_m"
 
 topics:
   - ["daily commute and traffic frustrations in Dhaka", 40]

@@ -9,7 +9,7 @@ def export_gguf(config_path: str | None = None) -> None:
     """Merge SFT adapter and export to GGUF for local inference."""
     config = load_config(config_path)
     model_cfg = config.model
-    sft_cfg = config.sft
+    sft_cfg = config.sft_training
     export_cfg = config.export
 
     model, tokenizer = FastLanguageModel.from_pretrained(
@@ -21,9 +21,9 @@ def export_gguf(config_path: str | None = None) -> None:
     model.save_pretrained_gguf(
         export_cfg.path,
         tokenizer,
-        quantization_method="q4_k_m",
+        quantization_method=export_cfg.quantization_method,
     )
-    print(f"Export complete — {export_cfg.path}.Q4_K_M.gguf")
+    print(f"Export complete — {export_cfg.path}.{export_cfg.quantization_method}.gguf")
 
 
 if __name__ == "__main__":

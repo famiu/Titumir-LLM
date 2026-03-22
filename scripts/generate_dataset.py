@@ -9,12 +9,11 @@ from threading import Lock
 import requests
 from dotenv import load_dotenv
 
-from training.config import LLMEndpointConfig, load_config
+from training.config import GenerationConfig, load_config
 
 load_dotenv()
 
 MAX_WORKERS = min(32, (os.cpu_count() or 1) * 4)
-BATCH_TIMEOUT = 120
 RETRY_BACKOFF = [2, 5, 10, 30, 60]
 MAX_RETRIES = 5
 
@@ -24,8 +23,9 @@ def generate_batch_with_retry(
     n: int,
     topic_idx: int,
     batch_num: int,
-    llm_config: LLMEndpointConfig,
+    llm_config: GenerationConfig,
     generation_prompt: str,
+    batch_timeout: int,
 ) -> list[dict]:
     """Generate a single batch with retries. Returns examples or raises on total failure."""
     api_key = llm_config.get_api_key()
@@ -47,7 +47,7 @@ def generate_batch_with_retry(
                     "max_tokens": llm_config.max_tokens,
                     "reasoning": {"effort": "none"},
                 },
-                timeout=BATCH_TIMEOUT,
+                timeout=batch_timeout,
             )
             response.raise_for_status()
             raw = response.json()["choices"][0]["message"]["content"]
@@ -61,7 +61,7 @@ def generate_batch_with_retry(
         except requests.exceptions.Timeout:
             wait = RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)]
             print(
-                f"  [topic {topic_idx} batch {batch_num}] Timed out after {BATCH_TIMEOUT}s "
+                f"  [topic {topic_idx} batch {batch_num}] Timed out after {batch_timeout}s "
                 f"(attempt {attempt + 1}/{MAX_RETRIES}) — retrying in {wait}s"
             )
             time.sleep(wait)
@@ -118,8 +118,9 @@ def generate_topic(
     examples_for_topic: int,
     batch_size: int,
     total_topics: int,
-    llm_config: LLMEndpointConfig,
+    llm_config: GenerationConfig,
     generation_prompt_template: str,
+    batch_timeout: int,
 ) -> list[dict]:
     """Generate all examples for a single topic sequentially."""
     print(f"\n[{topic_idx}/{total_topics}] Topic: {topic} ({examples_for_topic} examples)")
@@ -132,7 +133,7 @@ def generate_topic(
         print(f"  [topic {topic_idx}] Batch {batch_num} — requesting {n} examples...")
 
         generation_prompt = generation_prompt_template.format(n=n, topic=topic)
-        batch = generate_batch_with_retry(topic, n, topic_idx, batch_num, llm_config, generation_prompt)
+        batch = generate_batch_with_retry(topic, n, topic_idx, batch_num, llm_config, generation_prompt, batch_timeout)
         valid = [
             {"messages": [{"role": m["role"], "content": m["content"]} for m in ex["messages"]]}
             for ex in batch
@@ -158,6 +159,13 @@ def generate_dataset(
 ) -> None:
     """Generate full dataset across all topics using parallel workers."""
     config = load_config(config_path)
+    gen_cfg = config.generation
+
+    if gen_cfg.model == "CHANGE_ME":
+        raise ValueError("Generation model not configured. Set 'model' in the 'generation' section of your config.")
+
+    if not gen_cfg.prompt or not gen_cfg.prompt.strip():
+        raise ValueError("Generation prompt not configured. Set 'prompt' in the 'generation' section of your config.")
 
     output_dir = config.paths.unprocessed_data_dir
     os.makedirs(output_dir, exist_ok=True)
@@ -170,14 +178,13 @@ def generate_dataset(
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_file = os.path.join(output_dir, f"bangla_sft_{timestamp}.jsonl")
 
-    batch_size = 20
     total_topics = len(config.topics)
     total_written = 0
     write_lock = Lock()
 
     print(f"Generating dataset with {MAX_WORKERS} parallel topic workers")
     print(f"Output: {output_file}")
-    print(f"Using LLM: {config.llm.generation.model}")
+    print(f"Using LLM: {gen_cfg.model}")
 
     results: dict[int, list[dict]] = {}
 
@@ -190,10 +197,11 @@ def generate_dataset(
                         topic_idx,
                         topic_entry.topic,
                         topic_entry.count,
-                        batch_size,
+                        gen_cfg.batch_size,
                         total_topics,
-                        config.llm.generation,
-                        config.prompts.generation,
+                        gen_cfg,
+                        gen_cfg.prompt,
+                        gen_cfg.batch_timeout,
                     ): topic_idx
                     for topic_idx, topic_entry in enumerate(config.topics, 1)
                 }

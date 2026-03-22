@@ -9,14 +9,12 @@ from threading import Lock
 import requests
 from dotenv import load_dotenv
 
-from training.config import LLMEndpointConfig, load_config
+from training.config import RefinementConfig, load_config
 
 load_dotenv()
 
 MAX_WORKERS = min(32, (os.cpu_count() or 1) * 4)
-CHECKER_BATCH_SIZE = 40
 MAX_RETRIES = 5
-BATCH_TIMEOUT = 120
 RETRY_BACKOFF = [2, 5, 10, 30, 60]
 
 
@@ -24,8 +22,9 @@ def check_batch_with_retry(
     batch_idx: int,
     batch: list[dict],
     start: int,
-    llm_config: LLMEndpointConfig,
+    llm_config: RefinementConfig,
     refinement_prompt: str,
+    batch_timeout: int,
 ) -> tuple[int, list[dict], list[dict]]:
     """Check a single batch with retries. Returns (batch_idx, kept, removed_with_reasons)."""
     api_key = llm_config.get_api_key()
@@ -58,7 +57,7 @@ def check_batch_with_retry(
                     "max_tokens": llm_config.max_tokens,
                     "reasoning": {"effort": "none"},
                 },
-                timeout=BATCH_TIMEOUT,
+                timeout=batch_timeout,
             )
             response.raise_for_status()
             raw = response.json()["choices"][0]["message"]["content"]
@@ -91,7 +90,7 @@ def check_batch_with_retry(
         except requests.exceptions.Timeout:
             wait = RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)]
             print(
-                f"  [batch {batch_idx}] Timed out after {BATCH_TIMEOUT}s "
+                f"  [batch {batch_idx}] Timed out after {batch_timeout}s "
                 f"(attempt {attempt + 1}/{MAX_RETRIES}) — retrying in {wait}s"
             )
             time.sleep(wait)
@@ -126,20 +125,33 @@ def refine_file(
     input_file: Path,
     refined_dir: str,
     removed_dir: str,
-    llm_config: LLMEndpointConfig,
+    llm_config: RefinementConfig,
     refinement_prompt: str,
+    batch_size: int,
+    batch_timeout: int,
 ) -> None:
     """Refine a single JSONL file."""
     kept_file = os.path.join(refined_dir, input_file.name)
     removed_file = os.path.join(removed_dir, input_file.name)
 
+    all_examples = []
     with open(input_file, encoding="utf-8") as f:
-        all_examples = [json.loads(line) for line in f if line.strip()]
+        for line_num, line in enumerate(f, 1):
+            if not line.strip():
+                continue
+            try:
+                all_examples.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                print(f"  Warning: Skipping malformed JSON at line {line_num}: {e}")
 
     total = len(all_examples)
+    if total == 0:
+        print(f"  {input_file.name}: Empty file, nothing to refine")
+        return
+
     batches = []
-    for i in range(0, total, CHECKER_BATCH_SIZE):
-        batches.append((i // CHECKER_BATCH_SIZE, all_examples[i : i + CHECKER_BATCH_SIZE], i))
+    for i in range(0, total, batch_size):
+        batches.append((i // batch_size, all_examples[i : i + batch_size], i))
 
     total_batches = len(batches)
     print(f"\nRefining {input_file.name} — {total} examples, {total_batches} batches")
@@ -150,7 +162,15 @@ def refine_file(
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
-            executor.submit(check_batch_with_retry, idx, batch, start, llm_config, refinement_prompt): idx
+            executor.submit(
+                check_batch_with_retry,
+                idx,
+                batch,
+                start,
+                llm_config,
+                refinement_prompt,
+                batch_timeout,
+            ): idx
             for idx, batch, start in batches
         }
 
@@ -188,9 +208,8 @@ def refine_file(
                 print(f"         Comment: {entry['example']['messages'][1]['content'][:80]}")
                 total_removed += 1
 
-    print(
-        f"  {input_file.name} done — {total_kept} kept, {total_removed} removed ({100 * total_kept // total}% retained)"
-    )
+    retention = f"{100 * total_kept // total}%" if total > 0 else "0%"
+    print(f"  {input_file.name} done — {total_kept} kept, {total_removed} removed ({retention} retained)")
 
 
 def refine_dataset(
@@ -199,6 +218,7 @@ def refine_dataset(
 ) -> None:
     """Refine all unprocessed JSONL files that don't already have a refined counterpart."""
     config = load_config(config_path)
+    ref_cfg = config.refinement
     input_dir = config.paths.unprocessed_data_dir
     refined_dir = config.paths.refined_data_dir
     removed_dir = config.paths.removed_data_dir
@@ -206,10 +226,13 @@ def refine_dataset(
     unprocessed_path = Path(input_dir)
     refined_path = Path(refined_dir)
 
-    llm_config = config.llm.get_refinement_config()
-    refinement_prompt = config.prompts.refinement
+    if ref_cfg.model == "CHANGE_ME":
+        raise ValueError("Refinement model not configured. Set 'model' in the 'refinement' section of your config.")
 
-    print(f"Using LLM for refinement: {llm_config.model}")
+    if not ref_cfg.prompt or not ref_cfg.prompt.strip():
+        raise ValueError("Refinement prompt not configured. Set 'prompt' in the 'refinement' section of your config.")
+
+    print(f"Using LLM for refinement: {ref_cfg.model}")
 
     if input_file is not None:
         input_path = Path(input_dir) / input_file
@@ -218,7 +241,15 @@ def refine_dataset(
             return
         os.makedirs(refined_dir, exist_ok=True)
         os.makedirs(removed_dir, exist_ok=True)
-        refine_file(input_path, refined_dir, removed_dir, llm_config, refinement_prompt)
+        refine_file(
+            input_path,
+            refined_dir,
+            removed_dir,
+            ref_cfg,
+            ref_cfg.prompt,
+            ref_cfg.batch_size,
+            ref_cfg.batch_timeout,
+        )
         return
 
     if not unprocessed_path.exists():
@@ -244,7 +275,15 @@ def refine_dataset(
 
     try:
         for file in pending:
-            refine_file(file, refined_dir, removed_dir, llm_config, refinement_prompt)
+            refine_file(
+                file,
+                refined_dir,
+                removed_dir,
+                ref_cfg,
+                ref_cfg.prompt,
+                ref_cfg.batch_size,
+                ref_cfg.batch_timeout,
+            )
     except KeyboardInterrupt:
         print("\nInterrupted")
         return

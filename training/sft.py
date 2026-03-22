@@ -12,8 +12,8 @@ def run_sft(config_path: str | None = None, dataset_path: str | None = None) -> 
     """Run supervised finetuning on conversational dataset."""
     config = load_config(config_path)
     model_cfg = config.model
-    cpt_cfg = config.cpt
-    sft_cfg = config.sft
+    cpt_cfg = config.cpt_training
+    sft_cfg = config.sft_training
 
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=cpt_cfg.checkpoint,
@@ -23,7 +23,7 @@ def run_sft(config_path: str | None = None, dataset_path: str | None = None) -> 
 
     model = FastLanguageModel.get_peft_model(
         model,
-        r=32,
+        r=sft_cfg.lora_r,
         target_modules=[
             "q_proj",
             "k_proj",
@@ -33,7 +33,7 @@ def run_sft(config_path: str | None = None, dataset_path: str | None = None) -> 
             "up_proj",
             "down_proj",
         ],
-        lora_alpha=64,
+        lora_alpha=sft_cfg.lora_alpha,
         lora_dropout=0,
         bias="none",
         use_gradient_checkpointing="unsloth",
@@ -70,8 +70,8 @@ def run_sft(config_path: str | None = None, dataset_path: str | None = None) -> 
             max_seq_length=model_cfg.max_seq_length,
             learning_rate=2e-4,
             num_train_epochs=3,
-            per_device_train_batch_size=4,
-            gradient_accumulation_steps=4,
+            per_device_train_batch_size=sft_cfg.batch_size,
+            gradient_accumulation_steps=sft_cfg.gradient_accumulation_steps,
             bf16=True,
             logging_steps=10,
             save_steps=50,

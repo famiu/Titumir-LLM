@@ -29,11 +29,17 @@ def merge_datasets(config_path: str | None = None) -> None:
 
     for path in files:
         before = len(examples)
+        line_num = 0
         with open(path, encoding="utf-8") as f:
             for line in f:
+                line_num += 1
                 if not line.strip():
                     continue
-                ex = json.loads(line)
+                try:
+                    ex = json.loads(line)
+                except json.JSONDecodeError as e:
+                    print(f"  Warning: Skipping malformed JSON in {path.name} at line {line_num}: {e}")
+                    continue
                 content = ex["messages"][-1]["content"]
                 if content not in seen:
                     seen.add(content)

@@ -27,57 +27,68 @@ class ModelConfig(BaseModel):
     max_seq_length: int = 2048
 
 
-class CPTConfig(BaseModel):
+class CPTTrainingConfig(BaseModel):
     """Configuration for continued pretraining."""
 
     max_examples: int = 500_000
     output_dir: str = "./checkpoints/cpt"
     checkpoint: str = "./checkpoints/cpt_final"
+    lora_r: int = 16
+    lora_alpha: int = 32
+    batch_size: int = 4
+    gradient_accumulation_steps: int = 4
 
 
-class SFTConfig(BaseModel):
+class SFTTrainingConfig(BaseModel):
     """Configuration for supervised finetuning."""
 
     output_dir: str = "./checkpoints/sft"
     checkpoint: str = "./checkpoints/sft_final"
+    lora_r: int = 32
+    lora_alpha: int = 64
+    batch_size: int = 4
+    gradient_accumulation_steps: int = 4
 
 
-class ExportConfig(BaseModel):
-    """Configuration for model export."""
-
-    path: str = "./export/titumir_9b"
-
-
-class LLMEndpointConfig(BaseModel):
-    """Configuration for LLM API endpoint."""
+class GenerationConfig(BaseModel):
+    """Configuration for dataset generation."""
 
     endpoint: str = "https://openrouter.ai/api/v1/chat/completions"
     api_key_env: str = "OPENROUTER_API_KEY"
-    model: str = "google/gemini-3.1-flash-lite-preview"
+    model: str = "CHANGE_ME"
     temperature: float = 0.9
     max_tokens: int = 4000
+    batch_size: int = 20
+    batch_timeout: int = 120
+    prompt: str = ""
 
     def get_api_key(self) -> str | None:
         """Get the API key from the environment variable."""
         return os.environ.get(self.api_key_env)
 
 
-class LLMConfig(BaseModel):
-    """Configuration for LLM settings."""
+class RefinementConfig(BaseModel):
+    """Configuration for dataset refinement."""
 
-    generation: LLMEndpointConfig = Field(default_factory=LLMEndpointConfig)
-    refinement: LLMEndpointConfig | None = None
+    endpoint: str = "https://openrouter.ai/api/v1/chat/completions"
+    api_key_env: str = "OPENROUTER_API_KEY"
+    model: str = "CHANGE_ME"
+    temperature: float = 0.1
+    max_tokens: int = 1000
+    batch_size: int = 40
+    batch_timeout: int = 120
+    prompt: str = ""
 
-    def get_refinement_config(self) -> LLMEndpointConfig:
-        """Get refinement config, falling back to generation config if not set."""
-        return self.refinement or self.generation
+    def get_api_key(self) -> str | None:
+        """Get the API key from the environment variable."""
+        return os.environ.get(self.api_key_env)
 
 
-class PromptsConfig(BaseModel):
-    """Configuration for prompts."""
+class ExportConfig(BaseModel):
+    """Configuration for model export."""
 
-    generation: str = ""
-    refinement: str = ""
+    path: str = "./export/titumir_9b"
+    quantization_method: str = "q4_k_m"
 
 
 class TopicEntry(BaseModel):
@@ -92,11 +103,11 @@ class Config(BaseModel):
 
     paths: PathsConfig = Field(default_factory=PathsConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
-    cpt: CPTConfig = Field(default_factory=CPTConfig)
-    sft: SFTConfig = Field(default_factory=SFTConfig)
+    cpt_training: CPTTrainingConfig = Field(default_factory=CPTTrainingConfig)
+    sft_training: SFTTrainingConfig = Field(default_factory=SFTTrainingConfig)
+    generation: GenerationConfig = Field(default_factory=GenerationConfig)
+    refinement: RefinementConfig = Field(default_factory=RefinementConfig)
     export: ExportConfig = Field(default_factory=ExportConfig)
-    llm: LLMConfig = Field(default_factory=LLMConfig)
-    prompts: PromptsConfig = Field(default_factory=PromptsConfig)
     topics: list[TopicEntry] = Field(default_factory=list)
 
     @classmethod
@@ -117,6 +128,18 @@ class Config(BaseModel):
                 {"topic": t[0], "count": t[1]} if isinstance(t, list | tuple) else t for t in data["topics"]
             ]
 
+        if "prompts" in data:
+            prompts = data.pop("prompts")
+            if isinstance(prompts, dict):
+                if "generation" in prompts and "generation" not in data:
+                    if "generation" not in data:
+                        data["generation"] = {}
+                    data["generation"]["prompt"] = prompts["generation"]
+                if "refinement" in prompts and "refinement" not in data:
+                    if "refinement" not in data:
+                        data["refinement"] = {}
+                    data["refinement"]["prompt"] = prompts["refinement"]
+
         return cls.model_validate(data)
 
 
@@ -136,13 +159,3 @@ def load_config(path: str | Path | None = None) -> Config:
 
     config_path = Path(path)
     return Config.from_yaml(config_path)
-
-
-def get_config() -> Config:
-    """Get the default configuration."""
-    return _load_default_config()
-
-
-def reset_config_cache() -> None:
-    """Clear the default configuration cache."""
-    _load_default_config.cache_clear()

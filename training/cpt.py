@@ -11,7 +11,7 @@ def run_cpt(config_path: str | None = None) -> None:
     """Run continued pretraining on raw Bengali text, prioritizing colloquial sources."""
     config = load_config(config_path)
     model_cfg = config.model
-    cpt_cfg = config.cpt
+    cpt_cfg = config.cpt_training
 
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=model_cfg.name,
@@ -21,7 +21,7 @@ def run_cpt(config_path: str | None = None) -> None:
 
     model = FastLanguageModel.get_peft_model(
         model,
-        r=16,
+        r=cpt_cfg.lora_r,
         target_modules=[
             "q_proj",
             "k_proj",
@@ -31,7 +31,7 @@ def run_cpt(config_path: str | None = None) -> None:
             "up_proj",
             "down_proj",
         ],
-        lora_alpha=32,
+        lora_alpha=cpt_cfg.lora_alpha,
         lora_dropout=0,
         bias="none",
         use_gradient_checkpointing="unsloth",
@@ -107,8 +107,8 @@ def run_cpt(config_path: str | None = None) -> None:
             max_seq_length=model_cfg.max_seq_length,
             learning_rate=5e-6,
             num_train_epochs=1,
-            per_device_train_batch_size=4,
-            gradient_accumulation_steps=4,
+            per_device_train_batch_size=cpt_cfg.batch_size,
+            gradient_accumulation_steps=cpt_cfg.gradient_accumulation_steps,
             bf16=True,
             logging_steps=10,
             save_steps=100,
