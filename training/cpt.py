@@ -1,21 +1,21 @@
+import argparse
+
 from datasets import interleave_datasets, load_dataset
 from trl import SFTConfig, SFTTrainer
 from unsloth import FastLanguageModel
 
-from training.config import (
-    CPT_CHECKPOINT,
-    CPT_MAX_EXAMPLES,
-    CPT_OUTPUT_DIR,
-    MAX_SEQ_LENGTH,
-    MODEL_NAME,
-)
+from training.config import load_config
 
 
-def run_cpt() -> None:
+def run_cpt(config_path: str | None = None) -> None:
     """Run continued pretraining on raw Bengali text, prioritizing colloquial sources."""
+    config = load_config(config_path)
+    model_cfg = config.model
+    cpt_cfg = config.cpt
+
     model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=MODEL_NAME,
-        max_seq_length=MAX_SEQ_LENGTH,
+        model_name=model_cfg.name,
+        max_seq_length=model_cfg.max_seq_length,
         load_in_4bit=True,
     )
 
@@ -93,7 +93,7 @@ def run_cpt() -> None:
             stopping_strategy="all_exhausted",
         )
         .shuffle(seed=42)
-        .select(range(CPT_MAX_EXAMPLES))
+        .select(range(cpt_cfg.max_examples))
     )
 
     print(f"Total CPT examples: {len(raw_dataset)}")
@@ -104,7 +104,7 @@ def run_cpt() -> None:
         train_dataset=raw_dataset,
         args=SFTConfig(
             dataset_text_field="text",
-            max_seq_length=MAX_SEQ_LENGTH,
+            max_seq_length=model_cfg.max_seq_length,
             learning_rate=5e-6,
             num_train_epochs=1,
             per_device_train_batch_size=4,
@@ -113,7 +113,7 @@ def run_cpt() -> None:
             logging_steps=10,
             save_steps=100,
             save_total_limit=2,
-            output_dir=CPT_OUTPUT_DIR,
+            output_dir=cpt_cfg.output_dir,
             warmup_ratio=0.05,
             lr_scheduler_type="cosine",
             report_to="none",
@@ -123,10 +123,13 @@ def run_cpt() -> None:
     print("Starting CPT...")
     trainer.train()
 
-    model.save_pretrained(CPT_CHECKPOINT)
-    tokenizer.save_pretrained(CPT_CHECKPOINT)
-    print(f"CPT complete — saved to {CPT_CHECKPOINT}")
+    model.save_pretrained(cpt_cfg.checkpoint)
+    tokenizer.save_pretrained(cpt_cfg.checkpoint)
+    print(f"CPT complete — saved to {cpt_cfg.checkpoint}")
 
 
 if __name__ == "__main__":
-    run_cpt()
+    parser = argparse.ArgumentParser(description="Run continued pretraining")
+    parser.add_argument("-c", "--config", type=str, default=None, help="Path to config file")
+    args = parser.parse_args()
+    run_cpt(config_path=args.config)

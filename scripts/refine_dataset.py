@@ -1,6 +1,6 @@
+import argparse
 import json
 import os
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -9,10 +9,9 @@ from threading import Lock
 import requests
 from dotenv import load_dotenv
 
-from training.config import REFINED_DATA_DIR, REFINEMENT_SYSTEM_PROMPT, REMOVED_DATA_DIR, UNPROCESSED_DATA_DIR
+from training.config import LLMEndpointConfig, load_config
 
 load_dotenv()
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
 MAX_WORKERS = min(32, (os.cpu_count() or 1) * 4)
 CHECKER_BATCH_SIZE = 40
@@ -25,8 +24,14 @@ def check_batch_with_retry(
     batch_idx: int,
     batch: list[dict],
     start: int,
+    llm_config: LLMEndpointConfig,
+    refinement_prompt: str,
 ) -> tuple[int, list[dict], list[dict]]:
     """Check a single batch with retries. Returns (batch_idx, kept, removed_with_reasons)."""
+    api_key = llm_config.get_api_key()
+    if not api_key:
+        raise ValueError(f"API key not found: set {llm_config.api_key_env} environment variable")
+
     formatted = []
     for i, ex in enumerate(batch):
         post = ex["messages"][0]["content"]
@@ -38,19 +43,19 @@ def check_batch_with_retry(
     for attempt in range(MAX_RETRIES):
         try:
             response = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
+                llm_config.endpoint,
                 headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": "google/gemini-3.1-flash-lite-preview",
+                    "model": llm_config.model,
                     "messages": [
-                        {"role": "system", "content": REFINEMENT_SYSTEM_PROMPT},
+                        {"role": "system", "content": refinement_prompt},
                         {"role": "user", "content": prompt},
                     ],
-                    "temperature": 0.1,
-                    "max_tokens": 1000,
+                    "temperature": llm_config.temperature,
+                    "max_tokens": llm_config.max_tokens,
                     "reasoning": {"effort": "none"},
                 },
                 timeout=BATCH_TIMEOUT,
@@ -80,40 +85,40 @@ def check_batch_with_retry(
             return batch_idx, kept, removed
 
         except (json.JSONDecodeError, KeyError):
-            print(f"  [batch {batch_idx}] ✗ Parse failed — keeping entire batch")
+            print(f"  [batch {batch_idx}] Parse failed — keeping entire batch")
             return batch_idx, batch, []
 
         except requests.exceptions.Timeout:
             wait = RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)]
             print(
-                f"  [batch {batch_idx}] ✗ Timed out after {BATCH_TIMEOUT}s "
+                f"  [batch {batch_idx}] Timed out after {BATCH_TIMEOUT}s "
                 f"(attempt {attempt + 1}/{MAX_RETRIES}) — retrying in {wait}s"
             )
             time.sleep(wait)
 
         except requests.exceptions.ConnectionError:
             wait = RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)]
-            print(f"  [batch {batch_idx}] ✗ Network error (attempt {attempt + 1}/{MAX_RETRIES}) — retrying in {wait}s")
+            print(f"  [batch {batch_idx}] Network error (attempt {attempt + 1}/{MAX_RETRIES}) — retrying in {wait}s")
             time.sleep(wait)
 
         except requests.HTTPError as e:
             if e.response.status_code == 429:
                 wait = RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)] * 2
-                print(f"  [batch {batch_idx}] ✗ Rate limited — retrying in {wait}s")
+                print(f"  [batch {batch_idx}] Rate limited — retrying in {wait}s")
                 time.sleep(wait)
             elif e.response.status_code >= 500:
                 wait = RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)]
-                print(f"  [batch {batch_idx}] ✗ Server error {e.response.status_code} — retrying in {wait}s")
+                print(f"  [batch {batch_idx}] Server error {e.response.status_code} — retrying in {wait}s")
                 time.sleep(wait)
             else:
-                print(f"  [batch {batch_idx}] ✗ Client error {e.response.status_code} — keeping entire batch")
+                print(f"  [batch {batch_idx}] Client error {e.response.status_code} — keeping entire batch")
                 return batch_idx, batch, []
 
         except Exception as e:
-            print(f"  [batch {batch_idx}] ✗ Unexpected error: {e} — keeping entire batch")
+            print(f"  [batch {batch_idx}] Unexpected error: {e} — keeping entire batch")
             return batch_idx, batch, []
 
-    print(f"  [batch {batch_idx}] ✗ All {MAX_RETRIES} retries exhausted — keeping entire batch")
+    print(f"  [batch {batch_idx}] All {MAX_RETRIES} retries exhausted — keeping entire batch")
     return batch_idx, batch, []
 
 
@@ -121,6 +126,8 @@ def refine_file(
     input_file: Path,
     refined_dir: str,
     removed_dir: str,
+    llm_config: LLMEndpointConfig,
+    refinement_prompt: str,
 ) -> None:
     """Refine a single JSONL file."""
     kept_file = os.path.join(refined_dir, input_file.name)
@@ -142,7 +149,10 @@ def refine_file(
     completed = 0
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(check_batch_with_retry, idx, batch, start): idx for idx, batch, start in batches}
+        futures = {
+            executor.submit(check_batch_with_retry, idx, batch, start, llm_config, refinement_prompt): idx
+            for idx, batch, start in batches
+        }
 
         try:
             for future in as_completed(futures):
@@ -156,7 +166,7 @@ def refine_file(
                     )
 
         except KeyboardInterrupt:
-            print(f"\n⚠ Interrupted during {input_file.name}")
+            print(f"\nInterrupted during {input_file.name}")
             raise
 
     total_kept = 0
@@ -173,29 +183,46 @@ def refine_file(
                 total_kept += 1
             for entry in removed:
                 rf.write(json.dumps(entry, ensure_ascii=False) + "\n")
-                print(f"  ✗ [{entry['global_idx']:05d}] REMOVED — {entry['reason']}")
+                print(f"  [{entry['global_idx']:05d}] REMOVED — {entry['reason']}")
                 print(f"         Post:    {entry['example']['messages'][0]['content'][:80]}")
                 print(f"         Comment: {entry['example']['messages'][1]['content'][:80]}")
                 total_removed += 1
 
     print(
-        f"  ✓ {input_file.name} done — "
-        f"{total_kept} kept, {total_removed} removed "
-        f"({100 * total_kept // total}% retained)"
+        f"  {input_file.name} done — {total_kept} kept, {total_removed} removed ({100 * total_kept // total}% retained)"
     )
 
 
 def refine_dataset(
-    input_dir: str = UNPROCESSED_DATA_DIR,
-    refined_dir: str = REFINED_DATA_DIR,
-    removed_dir: str = REMOVED_DATA_DIR,
+    config_path: str | None = None,
+    input_file: str | None = None,
 ) -> None:
     """Refine all unprocessed JSONL files that don't already have a refined counterpart."""
+    config = load_config(config_path)
+    input_dir = config.paths.unprocessed_data_dir
+    refined_dir = config.paths.refined_data_dir
+    removed_dir = config.paths.removed_data_dir
+
     unprocessed_path = Path(input_dir)
     refined_path = Path(refined_dir)
 
+    llm_config = config.llm.get_refinement_config()
+    refinement_prompt = config.prompts.refinement
+
+    print(f"Using LLM for refinement: {llm_config.model}")
+
+    if input_file is not None:
+        input_path = Path(input_dir) / input_file
+        if not input_path.exists():
+            print(f"File not found: {input_path}")
+            return
+        os.makedirs(refined_dir, exist_ok=True)
+        os.makedirs(removed_dir, exist_ok=True)
+        refine_file(input_path, refined_dir, removed_dir, llm_config, refinement_prompt)
+        return
+
     if not unprocessed_path.exists():
-        print(f"✗ Input directory not found: {input_dir}")
+        print(f"Input directory not found: {input_dir}")
         return
 
     os.makedirs(refined_dir, exist_ok=True)
@@ -208,7 +235,7 @@ def refine_dataset(
     if skipped:
         print(f"Skipping {skipped} already-refined files")
     if not pending:
-        print("✓ All files already refined — nothing to do")
+        print("All files already refined — nothing to do")
         return
 
     print(f"Found {len(pending)} file(s) to refine:")
@@ -217,23 +244,17 @@ def refine_dataset(
 
     try:
         for file in pending:
-            refine_file(file, refined_dir, removed_dir)
+            refine_file(file, refined_dir, removed_dir, llm_config, refinement_prompt)
     except KeyboardInterrupt:
-        print("\n⚠ Interrupted")
+        print("\nInterrupted")
         return
 
-    print("\n✓ All done")
+    print("\nAll done")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        input_path = Path(UNPROCESSED_DATA_DIR) / sys.argv[1]
-        if not input_path.exists():
-            print(f"✗ File not found: {input_path}")
-            sys.exit(1)
-        os.makedirs(REFINED_DATA_DIR, exist_ok=True)
-        os.makedirs(REMOVED_DATA_DIR, exist_ok=True)
-        refine_file(input_path, REFINED_DATA_DIR, REMOVED_DATA_DIR)
-    else:
-        # No argument — scan unprocessed directory
-        refine_dataset()
+    parser = argparse.ArgumentParser(description="Refine generated dataset")
+    parser.add_argument("-c", "--config", type=str, default=None, help="Path to config file")
+    parser.add_argument("filename", nargs="?", type=str, default=None, help="Specific file to refine")
+    args = parser.parse_args()
+    refine_dataset(config_path=args.config, input_file=args.filename)

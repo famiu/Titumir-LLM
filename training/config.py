@@ -1,178 +1,148 @@
-# ── Example Config ────────────────────────────────────────────────────────────
-# This is a neutral config suitable as a starting point for custom personas.
-# Copy this file, modify as needed, and pass it to any script via --config.
+"""Configuration management for the Titumir LLM project."""
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
+from __future__ import annotations
 
-UNPROCESSED_DATA_DIR = "data/unprocessed"
-REFINED_DATA_DIR = "data/refined"
-REMOVED_DATA_DIR = "data/removed"
-DEFAULT_DATASET = "data/refined/bangla_sft_merged.jsonl"
-HF_DATASET = "famiu/titumir-sft-dataset"
+import os
+from functools import lru_cache
+from pathlib import Path
 
-# ── Model ─────────────────────────────────────────────────────────────────────
+import yaml
+from pydantic import BaseModel, Field
 
-MODEL_NAME = "Qwen/Qwen3.5-9B"
-MAX_SEQ_LENGTH = 2048
 
-# ── CPT ───────────────────────────────────────────────────────────────────────
+class PathsConfig(BaseModel):
+    """Configuration for data paths."""
 
-CPT_MAX_EXAMPLES = 500_000
-CPT_OUTPUT_DIR = "./checkpoints/cpt"
-CPT_CHECKPOINT = "./checkpoints/cpt_final"
+    unprocessed_data_dir: str = "data/unprocessed"
+    refined_data_dir: str = "data/refined"
+    removed_data_dir: str = "data/removed"
+    default_dataset: str = "data/refined/bangla_sft_merged.jsonl"
+    hf_dataset: str = "famiu/titumir-sft-dataset"
 
-# ── SFT ───────────────────────────────────────────────────────────────────────
 
-SFT_OUTPUT_DIR = "./checkpoints/sft"
-SFT_CHECKPOINT = "./checkpoints/sft_final"
+class ModelConfig(BaseModel):
+    """Configuration for the base model."""
 
-# ── Export ────────────────────────────────────────────────────────────────────
+    name: str = "Qwen/Qwen3.5-9B"
+    max_seq_length: int = 2048
 
-EXPORT_PATH = "./export/titumir_9b"
 
-# ── Data Generation Prompt ────────────────────────────────────────────────────
+class CPTConfig(BaseModel):
+    """Configuration for continued pretraining."""
 
-GENERATION_PROMPT = """Generate {n} Facebook post + comment pairs for Bengali LLM training data.
+    max_examples: int = 500_000
+    output_dir: str = "./checkpoints/cpt"
+    checkpoint: str = "./checkpoints/cpt_final"
 
-Each pair should be a realistic Bangladeshi Facebook interaction.
-The first message should reflect the topic being given, the second message
-should be a response to the first message.
 
-FORMAT:
-[
-  {{
-    "messages": [
-      {{
-        "role": "user",
-        "content": "[post text]"
-      }},
-      {{
-        "role": "assistant",
-        "content": "[natural Banglish comment]"
-      }}
-    ]
-  }}
-]
+class SFTConfig(BaseModel):
+    """Configuration for supervised finetuning."""
 
-TOPIC: {topic}
-REGISTER: colloquial Banglish, phone-typing style
+    output_dir: str = "./checkpoints/sft"
+    checkpoint: str = "./checkpoints/sft_final"
 
-SCRIPT DISTRIBUTION — strictly follow this across the batch:
-- 50% comments: mostly Bengali script with occasional English words
-- 25% comments: mostly romanized Bengali with occasional Bengali script
-- 25% comments: natural mix of Bengali script and romanized Bengali in the same sentence
 
-TONE RULES — choose based on the post content:
+class ExportConfig(BaseModel):
+    """Configuration for model export."""
 
-If the post is controversial or emotionally charged:
-  → respond naturally and honestly, 1-3 sentences
-  → express a genuine reaction without moralizing
+    path: str = "./export/titumir_9b"
 
-If the post is neutral or agreeable:
-  → casual and natural, 1-2 sentences, light emoji 😭😂🔥
-  → agree, react naturally, or add a small observation
 
-STYLE EXAMPLES:
-- "bhai eta ki hoise 😭 amader ki hobe"
-- "vai seriously?? amio same rokom vabsi"
-- "bhai এইটা দেইখা হাসতে হাসতে শেষ 😂"
-- "shala eita dekhe hasbo naki kandbo 💀"
-- "ekdom thik kotha, ami o ei rokom mone kori"
-- "bhai এই বিষয়টা নিয়ে অনেকদিন ধরে ভাবছি, তুমি ঠিকই বলেছ"
-- "disagree kori, kintu tomar point ta bujhte parchi"
+class LLMEndpointConfig(BaseModel):
+    """Configuration for LLM API endpoint."""
 
-Output valid JSON array only. No preamble. No markdown fences."""
+    endpoint: str = "https://openrouter.ai/api/v1/chat/completions"
+    api_key_env: str = "OPENROUTER_API_KEY"
+    model: str = "google/gemini-3.1-flash-lite-preview"
+    temperature: float = 0.9
+    max_tokens: int = 4000
 
-# ── Data Refinement Prompt ────────────────────────────────────────────────────
+    def get_api_key(self) -> str | None:
+        """Get the API key from the environment variable."""
+        return os.environ.get(self.api_key_env)
 
-REFINEMENT_SYSTEM_PROMPT = """You are a data quality checker for a Bengali LLM training dataset.
-You will receive a batch of training examples, each with an index, a post, and a comment.
-Your job is to remove low quality examples while preserving stylistic diversity.
 
-REMOVE an example if it:
-- Has malformed, truncated, or placeholder text like "[post text]" or "[comment]"
-- Has a comment that is completely unrelated to the post
-- Is a near-exact duplicate of another example in the same batch
-- Is incoherent or logically inconsistent
-- Sounds like it was written by an AI assistant rather than a real person
-- Has a comment that is so generic it could be a response to literally any post
-- Has a post and comment that are clearly copy-pasted or templated boilerplate
-- Contains invented words that do not exist in Bengali, English, or common Banglish
-  (misspellings, typos, and colloquial shortenings are fine and should be kept)
+class LLMConfig(BaseModel):
+    """Configuration for LLM settings."""
 
-KEEP an example if it:
-- Has a comment that engages with the specific content of the post in any way
-- Uses Bengali script, romanized Bengali, Banglish, English, or any natural mix
-- Sounds like something a real person might type, even if short or casual
-- Is a brief but contextually appropriate reaction (even a single specific emoji or word)
-- Contains misspellings, typos, or non-standard spellings — these are natural and desirable
+    generation: LLMEndpointConfig = Field(default_factory=LLMEndpointConfig)
+    refinement: LLMEndpointConfig | None = None
 
-You must try to remove at least a few examples per batch, unless the data is genuinely perfect.
-Almost all data has noise, so be careful.
+    def get_refinement_config(self) -> LLMEndpointConfig:
+        """Get refinement config, falling back to generation config if not set."""
+        return self.refinement or self.generation
 
-Output a JSON object only. No preamble. No markdown fences.
-Format:
-{
-  "keep": [0, 1, 3, ...],
-  "remove": [2, 4, ...],
-  "reasons": {
-    "2": "placeholder text in post",
-    "4": "comment is completely generic with no relation to post content"
-  }
-}"""
 
-# ── Data Generation Topics ────────────────────────────────────────────────────
-# (topic, num_examples_for_topic)
+class PromptsConfig(BaseModel):
+    """Configuration for prompts."""
 
-TOPICS: list[tuple[str, int]] = [
-    ("daily commute and traffic frustrations in Dhaka", 40),
-    ("street food and local restaurants in Bangladesh", 40),
-    ("load shedding and power outage complaints", 60),
-    ("Bangladesh national cricket team reactions", 80),
-    ("Bangladeshi music and new song releases", 40),
-    ("Bangladeshi drama and web series reactions", 40),
-    ("university and college student life", 60),
-    ("rising prices of essentials — rice, oil, vegetables", 80),
-    ("smartphone and tech discussions among Bangladeshi youth", 40),
-    ("funny and relatable everyday situations in Bangladesh", 60),
-    ("weather complaints — heat, floods, monsoon", 60),
-    ("online shopping experiences in Bangladesh", 40),
-    ("job market and unemployment frustrations", 80),
-    ("social media trends and viral content", 40),
-    ("family pressure around marriage and career", 60),
-    ("Dhaka vs other cities — lifestyle comparisons", 40),
-    ("road accidents and traffic law violations", 60),
-    ("hospital and healthcare experiences in Bangladesh", 60),
-    ("internet speed and mobile data complaints", 40),
-    ("Bangladeshi food culture and recipes", 40),
-    ("reactions to Bollywood and Hollywood movies", 40),
-    ("FIFA World Cup and football discussions", 60),
-    ("Bangladesh Premier League cricket reactions", 60),
-    ("student exam pressure and coaching culture", 60),
-    ("generational differences between parents and youth", 60),
-    ("pollution and environmental issues in Dhaka", 40),
-    ("nostalgia about childhood in Bangladesh", 40),
-    ("public transport experiences — bus, rickshaw, CNG", 40),
-    ("reactions to local memes and humor pages", 40),
-    ("side hustles and freelancing among Bangladeshi youth", 60),
-    ("relationships and dating culture in Bangladesh", 60),
-    ("Eid and festival preparations and celebrations", 40),
-    ("reactions to local celebrity gossip and drama", 40),
-    ("migrant worker experiences — remittance and sacrifice", 80),
-    ("studying abroad dreams and visa frustrations", 60),
-    ("gaming and esports among Bangladeshi youth", 40),
-    ("mental health awareness and social stigma", 60),
-    ("neighborhood and community life in Bangladesh", 40),
-    ("reactions to natural disasters — floods, cyclones", 60),
-    ("cost of living and middle class struggles", 80),
-    ("discussions about women's rights and gender equality in Bangladesh", 80),
-    ("discussions about religious diversity and coexistence in Bangladesh", 60),
-    ("discussions about Bangladesh's 1971 liberation war", 80),
-    ("discussions about labor rights and worker conditions in Bangladesh", 80),
-    ("discussions about political protests and civil movements in Bangladesh", 60),
-    ("discussions about minority communities and social inclusion", 60),
-    ("discussions about corruption and governance in Bangladesh", 80),
-    ("discussions about press freedom and media in Bangladesh", 60),
-    ("discussions about India-Bangladesh relations", 60),
-    ("discussions about climate change and environmental justice in Bangladesh", 60),
-]
+    generation: str = ""
+    refinement: str = ""
+
+
+class TopicEntry(BaseModel):
+    """A topic entry for dataset generation."""
+
+    topic: str
+    count: int
+
+
+class Config(BaseModel):
+    """Root configuration class."""
+
+    paths: PathsConfig = Field(default_factory=PathsConfig)
+    model: ModelConfig = Field(default_factory=ModelConfig)
+    cpt: CPTConfig = Field(default_factory=CPTConfig)
+    sft: SFTConfig = Field(default_factory=SFTConfig)
+    export: ExportConfig = Field(default_factory=ExportConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
+    prompts: PromptsConfig = Field(default_factory=PromptsConfig)
+    topics: list[TopicEntry] = Field(default_factory=list)
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> Config:
+        """Load configuration from a YAML file."""
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Config file not found: {path}")
+
+        with open(path, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+
+        if data is None:
+            data = {}
+
+        if "topics" in data and isinstance(data["topics"], list):
+            data["topics"] = [
+                {"topic": t[0], "count": t[1]} if isinstance(t, list | tuple) else t for t in data["topics"]
+            ]
+
+        return cls.model_validate(data)
+
+
+@lru_cache(maxsize=1)
+def _load_default_config() -> Config:
+    """Load the default configuration with caching."""
+    default_path = Path("configs/config.yaml")
+    if default_path.exists():
+        return Config.from_yaml(default_path)
+    return Config()
+
+
+def load_config(path: str | Path | None = None) -> Config:
+    """Load configuration from a YAML file, or use default if path is None."""
+    if path is None:
+        return _load_default_config()
+
+    config_path = Path(path)
+    return Config.from_yaml(config_path)
+
+
+def get_config() -> Config:
+    """Get the default configuration."""
+    return _load_default_config()
+
+
+def reset_config_cache() -> None:
+    """Clear the default configuration cache."""
+    _load_default_config.cache_clear()

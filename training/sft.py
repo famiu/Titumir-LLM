@@ -1,24 +1,23 @@
+import argparse
 import json
-import sys
 
-from datasets import Dataset
+from datasets import Dataset, load_dataset
 from trl import SFTConfig, SFTTrainer
 from unsloth import FastLanguageModel
 
-from training.config import (
-    CPT_CHECKPOINT,
-    HF_DATASET,
-    MAX_SEQ_LENGTH,
-    SFT_CHECKPOINT,
-    SFT_OUTPUT_DIR,
-)
+from training.config import load_config
 
 
-def run_sft(dataset_path: str | None = None) -> None:
+def run_sft(config_path: str | None = None, dataset_path: str | None = None) -> None:
     """Run supervised finetuning on conversational dataset."""
+    config = load_config(config_path)
+    model_cfg = config.model
+    cpt_cfg = config.cpt
+    sft_cfg = config.sft
+
     model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=CPT_CHECKPOINT,
-        max_seq_length=MAX_SEQ_LENGTH,
+        model_name=cpt_cfg.checkpoint,
+        max_seq_length=model_cfg.max_seq_length,
         load_in_4bit=True,
     )
 
@@ -42,17 +41,13 @@ def run_sft(dataset_path: str | None = None) -> None:
     )
 
     if dataset_path is not None:
-        # Load from local file
         with open(dataset_path, encoding="utf-8") as f:
             data = [json.loads(line) for line in f if line.strip()]
         print(f"Loaded {len(data)} examples from {dataset_path}")
         dataset = Dataset.from_list(data)
     else:
-        # Load from HuggingFace Hub
-        from datasets import load_dataset
-
-        dataset = load_dataset(HF_DATASET, split="train")
-        print(f"Loaded {len(dataset)} examples from {HF_DATASET}")
+        dataset = load_dataset(config.paths.hf_dataset, split="train")
+        print(f"Loaded {len(dataset)} examples from {config.paths.hf_dataset}")
 
     def format_example(example: dict) -> dict:
         """Format a single example using the model's chat template."""
@@ -72,7 +67,7 @@ def run_sft(dataset_path: str | None = None) -> None:
         train_dataset=dataset,
         args=SFTConfig(
             dataset_text_field="text",
-            max_seq_length=MAX_SEQ_LENGTH,
+            max_seq_length=model_cfg.max_seq_length,
             learning_rate=2e-4,
             num_train_epochs=3,
             per_device_train_batch_size=4,
@@ -81,7 +76,7 @@ def run_sft(dataset_path: str | None = None) -> None:
             logging_steps=10,
             save_steps=50,
             save_total_limit=2,
-            output_dir=SFT_OUTPUT_DIR,
+            output_dir=sft_cfg.output_dir,
             warmup_ratio=0.05,
             lr_scheduler_type="cosine",
             report_to="none",
@@ -91,11 +86,14 @@ def run_sft(dataset_path: str | None = None) -> None:
     print("Starting SFT...")
     trainer.train()
 
-    model.save_pretrained(SFT_CHECKPOINT)
-    tokenizer.save_pretrained(SFT_CHECKPOINT)
-    print(f"SFT complete — saved to {SFT_CHECKPOINT}")
+    model.save_pretrained(sft_cfg.checkpoint)
+    tokenizer.save_pretrained(sft_cfg.checkpoint)
+    print(f"SFT complete — saved to {sft_cfg.checkpoint}")
 
 
 if __name__ == "__main__":
-    path = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else None
-    run_sft(path)
+    parser = argparse.ArgumentParser(description="Run supervised finetuning")
+    parser.add_argument("-c", "--config", type=str, default=None, help="Path to config file")
+    parser.add_argument("dataset", nargs="?", type=str, default=None, help="Optional path to local dataset")
+    args = parser.parse_args()
+    run_sft(config_path=args.config, dataset_path=args.dataset)

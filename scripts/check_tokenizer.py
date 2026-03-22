@@ -1,8 +1,8 @@
+import argparse
+
 from transformers import AutoTokenizer
 
-from training.config import MODEL_NAME
-
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+from training.config import load_config
 
 TEST_STRINGS = [
     ("Pure Bengali script", "আজকে ঢাকায় অনেক জ্যাম ছিল, সত্যিই অনেক কষ্ট হয়েছে"),
@@ -13,19 +13,32 @@ TEST_STRINGS = [
     ("Political Bengali", "সরকারের দুর্নীতি আর সহ্য করা যাচ্ছে না, জনগণ এখন রাস্তায়"),
 ]
 
-print(f"Model: {MODEL_NAME}\n")
-print(f"{'Test':<25} {'Chars':>6} {'Tokens':>7} {'Ratio':>7} {'Assessment'}")
-print("─" * 70)
 
-for label, text in TEST_STRINGS:
-    tokens = tokenizer.encode(text)
-    ratio = len(tokens) / len(text)
+def check_tokenizer(config_path: str | None = None) -> None:
+    """Check tokenizer efficiency on Bengali text."""
+    config = load_config(config_path)
+    tokenizer = AutoTokenizer.from_pretrained(config.model.name)
 
-    if ratio < 1.5:
-        assessment = "✅ Excellent"
-    elif ratio < 2.5:
-        assessment = "⚠ Acceptable"
-    else:
-        assessment = "❌ Inefficient"
+    print(f"Model: {config.model.name}\n")
+    print(f"{'Test':<25} {'Chars':>6} {'Tokens':>7} {'Ratio':>7} {'Assessment'}")
+    print("─" * 70)
 
-    print(f"{label:<25} {len(text):>6} {len(tokens):>7} {ratio:>7.2f} {assessment}")
+    for label, text in TEST_STRINGS:
+        tokens = tokenizer.encode(text)
+        ratio = len(tokens) / len(text)
+
+        if ratio < 1.5:
+            assessment = "Excellent"
+        elif ratio < 2.5:
+            assessment = "Acceptable"
+        else:
+            assessment = "Inefficient"
+
+        print(f"{label:<25} {len(text):>6} {len(tokens):>7} {ratio:>7.2f} {assessment}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Check tokenizer efficiency on Bengali text")
+    parser.add_argument("-c", "--config", type=str, default=None, help="Path to config file")
+    args = parser.parse_args()
+    check_tokenizer(config_path=args.config)

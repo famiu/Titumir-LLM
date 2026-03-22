@@ -1,12 +1,25 @@
+import argparse
+
 from datasets import load_dataset
 from dotenv import load_dotenv
 from huggingface_hub import login
 
-from training.config import DEFAULT_DATASET, HF_DATASET
+from training.config import load_config
 
 load_dotenv()
 login()
 
-dataset = load_dataset("json", data_files=DEFAULT_DATASET, split="train")
-dataset.push_to_hub(HF_DATASET)
-print(f"✓ Pushed {len(dataset)} examples to {HF_DATASET}")
+
+def push_dataset(config_path: str | None = None) -> None:
+    """Push dataset to HuggingFace Hub."""
+    config = load_config(config_path)
+    dataset = load_dataset("json", data_files=config.paths.default_dataset, split="train")
+    dataset.push_to_hub(config.paths.hf_dataset)
+    print(f"Pushed {len(dataset)} examples to {config.paths.hf_dataset}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Push dataset to HuggingFace Hub")
+    parser.add_argument("-c", "--config", type=str, default=None, help="Path to config file")
+    args = parser.parse_args()
+    push_dataset(config_path=args.config)

@@ -68,6 +68,8 @@ just push-dataset
 just pull-dataset
 ```
 
+Use `--config` on any command to use a custom configuration file.
+
 ### Training Pipeline
 ```bash
 # Run full training pipeline: CPT → SFT → export
@@ -91,7 +93,32 @@ just lint
 
 ## Configuration
 
-All training parameters are in `training/config.py`:
+All configuration is managed via `configs/config.yaml`. The config uses a nested YAML structure organized into sections:
+
+- **paths** — Data directories and dataset paths
+- **model** — Base model name and sequence length
+- **cpt** — Continued pretraining settings (max examples, output/checkpoint dirs)
+- **sft** — Supervised finetuning settings (output/checkpoint dirs)
+- **export** — Model export path
+- **llm** — LLM API settings for data generation and refinement
+  - **generation** — API endpoint, model, temperature, max tokens
+  - **refinement** — Optional; falls back to generation settings if not set
+- **prompts** — Generation and refinement prompt templates
+- **topics** — List of topics for dataset generation
+
+### Using Custom Configs
+
+Pass a custom config file with `--config`:
+```bash
+just generate-dataset --config configs/custom.yaml
+just refine-dataset --config configs/custom.yaml
+just merge-dataset --config configs/custom.yaml
+just cpt --config configs/custom.yaml
+just sft --config configs/custom.yaml
+just export --config configs/custom.yaml
+```
+
+See `configs/config.yaml` for the default configuration.
 
 ## CPT Data Sources
 
