@@ -1,0 +1,178 @@
+# ── Example Config ────────────────────────────────────────────────────────────
+# This is a neutral config suitable as a starting point for custom personas.
+# Copy this file, modify as needed, and pass it to any script via --config.
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+
+UNPROCESSED_DATA_DIR = "data/unprocessed"
+REFINED_DATA_DIR = "data/refined"
+REMOVED_DATA_DIR = "data/removed"
+DEFAULT_DATASET = "data/refined/bangla_sft_merged.jsonl"
+HF_DATASET = "famiu/titumir-sft-dataset"
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+
+MODEL_NAME = "Qwen/Qwen3.5-9B"
+MAX_SEQ_LENGTH = 2048
+
+# ── CPT ───────────────────────────────────────────────────────────────────────
+
+CPT_MAX_EXAMPLES = 500_000
+CPT_OUTPUT_DIR = "./checkpoints/cpt"
+CPT_CHECKPOINT = "./checkpoints/cpt_final"
+
+# ── SFT ───────────────────────────────────────────────────────────────────────
+
+SFT_OUTPUT_DIR = "./checkpoints/sft"
+SFT_CHECKPOINT = "./checkpoints/sft_final"
+
+# ── Export ────────────────────────────────────────────────────────────────────
+
+EXPORT_PATH = "./export/titumir_9b"
+
+# ── Data Generation Prompt ────────────────────────────────────────────────────
+
+GENERATION_PROMPT = """Generate {n} Facebook post + comment pairs for Bengali LLM training data.
+
+Each pair should be a realistic Bangladeshi Facebook interaction.
+The first message should reflect the topic being given, the second message
+should be a response to the first message.
+
+FORMAT:
+[
+  {{
+    "messages": [
+      {{
+        "role": "user",
+        "content": "[post text]"
+      }},
+      {{
+        "role": "assistant",
+        "content": "[natural Banglish comment]"
+      }}
+    ]
+  }}
+]
+
+TOPIC: {topic}
+REGISTER: colloquial Banglish, phone-typing style
+
+SCRIPT DISTRIBUTION — strictly follow this across the batch:
+- 50% comments: mostly Bengali script with occasional English words
+- 25% comments: mostly romanized Bengali with occasional Bengali script
+- 25% comments: natural mix of Bengali script and romanized Bengali in the same sentence
+
+TONE RULES — choose based on the post content:
+
+If the post is controversial or emotionally charged:
+  → respond naturally and honestly, 1-3 sentences
+  → express a genuine reaction without moralizing
+
+If the post is neutral or agreeable:
+  → casual and natural, 1-2 sentences, light emoji 😭😂🔥
+  → agree, react naturally, or add a small observation
+
+STYLE EXAMPLES:
+- "bhai eta ki hoise 😭 amader ki hobe"
+- "vai seriously?? amio same rokom vabsi"
+- "bhai এইটা দেইখা হাসতে হাসতে শেষ 😂"
+- "shala eita dekhe hasbo naki kandbo 💀"
+- "ekdom thik kotha, ami o ei rokom mone kori"
+- "bhai এই বিষয়টা নিয়ে অনেকদিন ধরে ভাবছি, তুমি ঠিকই বলেছ"
+- "disagree kori, kintu tomar point ta bujhte parchi"
+
+Output valid JSON array only. No preamble. No markdown fences."""
+
+# ── Data Refinement Prompt ────────────────────────────────────────────────────
+
+REFINEMENT_SYSTEM_PROMPT = """You are a data quality checker for a Bengali LLM training dataset.
+You will receive a batch of training examples, each with an index, a post, and a comment.
+Your job is to remove low quality examples while preserving stylistic diversity.
+
+REMOVE an example if it:
+- Has malformed, truncated, or placeholder text like "[post text]" or "[comment]"
+- Has a comment that is completely unrelated to the post
+- Is a near-exact duplicate of another example in the same batch
+- Is incoherent or logically inconsistent
+- Sounds like it was written by an AI assistant rather than a real person
+- Has a comment that is so generic it could be a response to literally any post
+- Has a post and comment that are clearly copy-pasted or templated boilerplate
+- Contains invented words that do not exist in Bengali, English, or common Banglish
+  (misspellings, typos, and colloquial shortenings are fine and should be kept)
+
+KEEP an example if it:
+- Has a comment that engages with the specific content of the post in any way
+- Uses Bengali script, romanized Bengali, Banglish, English, or any natural mix
+- Sounds like something a real person might type, even if short or casual
+- Is a brief but contextually appropriate reaction (even a single specific emoji or word)
+- Contains misspellings, typos, or non-standard spellings — these are natural and desirable
+
+You must try to remove at least a few examples per batch, unless the data is genuinely perfect.
+Almost all data has noise, so be careful.
+
+Output a JSON object only. No preamble. No markdown fences.
+Format:
+{
+  "keep": [0, 1, 3, ...],
+  "remove": [2, 4, ...],
+  "reasons": {
+    "2": "placeholder text in post",
+    "4": "comment is completely generic with no relation to post content"
+  }
+}"""
+
+# ── Data Generation Topics ────────────────────────────────────────────────────
+# (topic, num_examples_for_topic)
+
+TOPICS: list[tuple[str, int]] = [
+    ("daily commute and traffic frustrations in Dhaka", 40),
+    ("street food and local restaurants in Bangladesh", 40),
+    ("load shedding and power outage complaints", 60),
+    ("Bangladesh national cricket team reactions", 80),
+    ("Bangladeshi music and new song releases", 40),
+    ("Bangladeshi drama and web series reactions", 40),
+    ("university and college student life", 60),
+    ("rising prices of essentials — rice, oil, vegetables", 80),
+    ("smartphone and tech discussions among Bangladeshi youth", 40),
+    ("funny and relatable everyday situations in Bangladesh", 60),
+    ("weather complaints — heat, floods, monsoon", 60),
+    ("online shopping experiences in Bangladesh", 40),
+    ("job market and unemployment frustrations", 80),
+    ("social media trends and viral content", 40),
+    ("family pressure around marriage and career", 60),
+    ("Dhaka vs other cities — lifestyle comparisons", 40),
+    ("road accidents and traffic law violations", 60),
+    ("hospital and healthcare experiences in Bangladesh", 60),
+    ("internet speed and mobile data complaints", 40),
+    ("Bangladeshi food culture and recipes", 40),
+    ("reactions to Bollywood and Hollywood movies", 40),
+    ("FIFA World Cup and football discussions", 60),
+    ("Bangladesh Premier League cricket reactions", 60),
+    ("student exam pressure and coaching culture", 60),
+    ("generational differences between parents and youth", 60),
+    ("pollution and environmental issues in Dhaka", 40),
+    ("nostalgia about childhood in Bangladesh", 40),
+    ("public transport experiences — bus, rickshaw, CNG", 40),
+    ("reactions to local memes and humor pages", 40),
+    ("side hustles and freelancing among Bangladeshi youth", 60),
+    ("relationships and dating culture in Bangladesh", 60),
+    ("Eid and festival preparations and celebrations", 40),
+    ("reactions to local celebrity gossip and drama", 40),
+    ("migrant worker experiences — remittance and sacrifice", 80),
+    ("studying abroad dreams and visa frustrations", 60),
+    ("gaming and esports among Bangladeshi youth", 40),
+    ("mental health awareness and social stigma", 60),
+    ("neighborhood and community life in Bangladesh", 40),
+    ("reactions to natural disasters — floods, cyclones", 60),
+    ("cost of living and middle class struggles", 80),
+    ("discussions about women's rights and gender equality in Bangladesh", 80),
+    ("discussions about religious diversity and coexistence in Bangladesh", 60),
+    ("discussions about Bangladesh's 1971 liberation war", 80),
+    ("discussions about labor rights and worker conditions in Bangladesh", 80),
+    ("discussions about political protests and civil movements in Bangladesh", 60),
+    ("discussions about minority communities and social inclusion", 60),
+    ("discussions about corruption and governance in Bangladesh", 80),
+    ("discussions about press freedom and media in Bangladesh", 60),
+    ("discussions about India-Bangladesh relations", 60),
+    ("discussions about climate change and environmental justice in Bangladesh", 60),
+]

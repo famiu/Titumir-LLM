@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# LLM stuff
+data/
+models/
+checkpoints/
+export/
+
+# Environment-specific config
+.env
+.envrc
+
+# Neovim local config
+.nvim.lua

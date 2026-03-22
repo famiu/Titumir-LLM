@@ -1,0 +1,104 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "titumir-llm"
+version = "0.1.0"
+description = "Bengali language finetuning pipeline for Qwen3.5 9B"
+authors = [{ name = "Famiu Haque", email = "famiuhaque@proton.me" }]
+requires-python = ">=3.11,<3.14"
+readme = "README.md"
+license = "Apache-2.0"
+keywords = [
+    "llm",
+    "bengali",
+    "bangla",
+    "ai",
+    "agent",
+    "chat",
+]
+dependencies = [
+    "unsloth>=2026.3.8",
+    "torch>=2.6.0",
+    "transformers>=5.3.0",
+    "trl>=0.18.2,<0.19.0",
+    "bitsandbytes>=0.49.2",
+    "datasets>=3.0.0",
+    "accelerate>=1.6.0",
+    "huggingface_hub>=0.30.0",
+    "python-dotenv>=1.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.29.0,<2",
+    "ruff>=0.9.4,<0.10",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "*.py",
+    "data/sft",
+    "data/eval",
+]
+
+[tool.hatch.build.targets.wheel]
+include = ["*.py"]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu124", marker = "platform_system != 'Darwin'" },
+    { index = "pytorch-cpu", marker = "platform_system == 'Darwin'" },
+]
+
+[tool.uv.extra-build-dependencies]
+xformers = ["torch"]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.ruff]
+line-length = 120
+indent-width = 4
+target-version = "py313"
+
+[tool.ruff.format]
+indent-style = "space"
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "D",
+    "N",
+    "SIM",
+    "UP",
+]
+ignore = ["D417", "D100", "E501"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.pyright]
+exclude = [
+    ".venv",
+    "**/__pycache__",
+    "checkpoints",
+    "output",
+    "data",
+]
+extraPaths = ["training", "scripts"]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "basic"
