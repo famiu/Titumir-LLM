@@ -77,8 +77,8 @@ just train
 
 # Or run stages individually
 just cpt
-just sft                                # loads dataset from HuggingFace Hub
-just sft data/refined/my_dataset.jsonl  # loads dataset from local file
+just sft          # loads dataset from HuggingFace Hub
+just sft --local  # loads dataset from local file
 just export
 ```
 

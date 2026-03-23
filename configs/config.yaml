@@ -2,7 +2,7 @@ paths:
   unprocessed_data_dir: "data/unprocessed"
   refined_data_dir: "data/refined"
   removed_data_dir: "data/removed"
-  default_dataset: "data/refined/bangla_sft_merged.jsonl"
+  local_dataset: "data/refined/bangla_sft_merged.jsonl"
   hf_dataset: "famiu/titumir-sft-dataset"
 
 model:
@@ -25,6 +25,7 @@ sft_training:
   lora_alpha: 64
   batch_size: 4
   gradient_accumulation_steps: 4
+  eval_split: 0.1
 
 generation:
   endpoint: "https://openrouter.ai/api/v1/chat/completions"

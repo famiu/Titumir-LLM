@@ -10,7 +10,7 @@ def merge_datasets(config_path: str | None = None) -> None:
     """Merge all refined JSONL files into a single deduplicated dataset."""
     config = load_config(config_path)
     input_dir = config.paths.refined_data_dir
-    output_file = config.paths.default_dataset
+    output_file = config.paths.local_dataset
 
     input_path = Path(input_dir)
     output_path = Path(output_file)
@@ -40,7 +40,7 @@ def merge_datasets(config_path: str | None = None) -> None:
                 except json.JSONDecodeError as e:
                     print(f"  Warning: Skipping malformed JSON in {path.name} at line {line_num}: {e}")
                     continue
-                content = ex["messages"][-1]["content"]
+                content = json.dumps(ex, sort_keys=True)
                 if content not in seen:
                     seen.add(content)
                     examples.append(ex)

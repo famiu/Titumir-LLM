@@ -14,6 +14,7 @@ data/
 models/
 checkpoints/
 export/
+unsloth_compiled_cache/
 
 # Environment-specific config
 .env

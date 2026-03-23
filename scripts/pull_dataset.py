@@ -17,11 +17,11 @@ def pull_dataset(config_path: str | None = None) -> None:
     dataset = load_dataset(config.paths.hf_dataset, split="train")
 
     os.makedirs(config.paths.refined_data_dir, exist_ok=True)
-    with open(config.paths.default_dataset, "w", encoding="utf-8") as f:
+    with open(config.paths.local_dataset, "w", encoding="utf-8") as f:
         for example in dataset:
             f.write(json.dumps(example, ensure_ascii=False) + "\n")
 
-    print(f"Pulled {len(dataset)} examples to {config.paths.default_dataset}")
+    print(f"Pulled {len(dataset)} examples to {config.paths.local_dataset}")
 
 
 if __name__ == "__main__":

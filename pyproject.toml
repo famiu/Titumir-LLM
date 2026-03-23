@@ -87,7 +87,7 @@ select = [
     "SIM",
     "UP",
 ]
-ignore = ["D417", "D100", "E501"]
+ignore = ["D417", "D100", "D102", "E501"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

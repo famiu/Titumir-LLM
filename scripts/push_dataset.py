@@ -13,7 +13,7 @@ def push_dataset(config_path: str | None = None) -> None:
     load_dotenv()
     login()
     config = load_config(config_path)
-    dataset_path = config.paths.default_dataset
+    dataset_path = config.paths.local_dataset
 
     if not Path(dataset_path).exists():
         print(f"Dataset file not found: {dataset_path}")
