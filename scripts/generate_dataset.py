@@ -11,40 +11,42 @@ from dotenv import load_dotenv
 
 from training.config import GenerationConfig, load_config
 
-load_dotenv()
 
-MAX_WORKERS = min(32, (os.cpu_count() or 1) * 4)
-RETRY_BACKOFF = [2, 5, 10, 30, 60]
-MAX_RETRIES = 5
+class _SafeDict(dict):
+    """Dict that returns {key} for missing keys, for safe str.format_map."""
+
+    def __missing__(self, key):
+        return "{" + key + "}"
+
+
+load_dotenv()
 
 
 def generate_batch_with_retry(
-    topic: str,
-    n: int,
     topic_idx: int,
     batch_num: int,
-    llm_config: GenerationConfig,
+    llm_cfg: GenerationConfig,
     generation_prompt: str,
     batch_timeout: int,
 ) -> list[dict]:
     """Generate a single batch with retries. Returns examples or raises on total failure."""
-    api_key = llm_config.get_api_key()
+    api_key = llm_cfg.get_api_key()
     if not api_key:
-        raise ValueError(f"API key not found: set {llm_config.api_key_env} environment variable")
+        raise ValueError(f"API key not found: set {llm_cfg.api_key_env} environment variable")
 
-    for attempt in range(MAX_RETRIES):
+    for attempt in range(llm_cfg.max_retries):
         try:
             response = requests.post(
-                llm_config.endpoint,
+                llm_cfg.endpoint,
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": llm_config.model,
+                    "model": llm_cfg.model,
                     "messages": [{"role": "user", "content": generation_prompt}],
-                    "temperature": llm_config.temperature,
-                    "max_tokens": llm_config.max_tokens,
+                    "temperature": llm_cfg.temperature,
+                    "max_tokens": llm_cfg.max_tokens,
                     "reasoning": {"effort": "none"},
                 },
                 timeout=batch_timeout,
@@ -56,31 +58,31 @@ def generate_batch_with_retry(
 
         except json.JSONDecodeError as e:
             print(f"  [topic {topic_idx} batch {batch_num}] JSON parse failed: {e} — retrying...")
-            time.sleep(RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)])
+            time.sleep(llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)])
 
         except requests.exceptions.Timeout:
-            wait = RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)]
+            wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)]
             print(
                 f"  [topic {topic_idx} batch {batch_num}] Timed out after {batch_timeout}s "
-                f"(attempt {attempt + 1}/{MAX_RETRIES}) — retrying in {wait}s"
+                f"(attempt {attempt + 1}/{llm_cfg.max_retries}) — retrying in {wait}s"
             )
             time.sleep(wait)
 
         except requests.exceptions.ConnectionError:
-            wait = RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)]
+            wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)]
             print(
                 f"  [topic {topic_idx} batch {batch_num}] Network error "
-                f"(attempt {attempt + 1}/{MAX_RETRIES}) — retrying in {wait}s"
+                f"(attempt {attempt + 1}/{llm_cfg.max_retries}) — retrying in {wait}s"
             )
             time.sleep(wait)
 
         except requests.HTTPError as e:
             if e.response.status_code == 429:
-                wait = RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)] * 2
+                wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)] * 2
                 print(f"  [topic {topic_idx} batch {batch_num}] Rate limited — retrying in {wait}s")
                 time.sleep(wait)
             elif e.response.status_code >= 500:
-                wait = RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)]
+                wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)]
                 print(
                     f"  [topic {topic_idx} batch {batch_num}] Server error {e.response.status_code} "
                     f"— retrying in {wait}s"
@@ -92,7 +94,7 @@ def generate_batch_with_retry(
 
         except Exception as e:
             print(f"  [topic {topic_idx} batch {batch_num}] Unexpected error: {e} — retrying...")
-            time.sleep(RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)])
+            time.sleep(llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)])
 
     print(f"  [topic {topic_idx} batch {batch_num}] All retries exhausted — skipping batch")
     return []
@@ -118,7 +120,7 @@ def generate_topic(
     examples_for_topic: int,
     batch_size: int,
     total_topics: int,
-    llm_config: GenerationConfig,
+    llm_cfg: GenerationConfig,
     generation_prompt_template: str,
     batch_timeout: int,
 ) -> list[dict]:
@@ -132,8 +134,8 @@ def generate_topic(
         n = min(examples_for_topic - len(topic_examples), batch_size)
         print(f"  [topic {topic_idx}] Batch {batch_num} — requesting {n} examples...")
 
-        generation_prompt = generation_prompt_template.format(n=n, topic=topic)
-        batch = generate_batch_with_retry(topic, n, topic_idx, batch_num, llm_config, generation_prompt, batch_timeout)
+        generation_prompt = generation_prompt_template.format_map(_SafeDict(n=n, topic=topic))
+        batch = generate_batch_with_retry(topic_idx, batch_num, llm_cfg, generation_prompt, batch_timeout)
         valid = [
             {"messages": [{"role": m["role"], "content": m["content"]} for m in ex["messages"]]}
             for ex in batch
@@ -182,7 +184,8 @@ def generate_dataset(
     total_written = 0
     write_lock = Lock()
 
-    print(f"Generating dataset with {MAX_WORKERS} parallel topic workers")
+    max_workers = gen_cfg.get_max_workers()
+    print(f"Generating dataset with {max_workers} parallel topic workers")
     print(f"Output: {output_file}")
     print(f"Using LLM: {gen_cfg.model}")
 
@@ -190,7 +193,7 @@ def generate_dataset(
 
     with open(output_file, "w", encoding="utf-8") as f:
         try:
-            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {
                     executor.submit(
                         generate_topic,

@@ -16,7 +16,7 @@ def run_cpt(config_path: str | None = None) -> None:
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=model_cfg.name,
         max_seq_length=model_cfg.max_seq_length,
-        load_in_4bit=True,
+        load_in_4bit=model_cfg.load_in_4bit,
     )
 
     model = FastLanguageModel.get_peft_model(

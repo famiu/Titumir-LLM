@@ -15,7 +15,7 @@ def export_gguf(config_path: str | None = None) -> None:
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=sft_cfg.checkpoint,
         max_seq_length=model_cfg.max_seq_length,
-        load_in_4bit=True,
+        load_in_4bit=model_cfg.load_in_4bit,
     )
 
     model.save_pretrained_gguf(

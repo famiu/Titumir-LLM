@@ -24,6 +24,7 @@ class ModelConfig(BaseModel):
 
     name: str = "Qwen/Qwen3.5-9B"
     max_seq_length: int = 2048
+    load_in_4bit: bool = True
 
     @field_validator("max_seq_length")
     @classmethod
@@ -123,6 +124,9 @@ class GenerationConfig(BaseModel):
     max_tokens: int = 4000
     batch_size: int = 20
     batch_timeout: int = 120
+    max_retries: int = 5
+    retry_backoff: list[int] = Field(default_factory=lambda: [2, 5, 10, 30, 60])
+    max_workers: int | None = None
     prompt: str = ""
 
     @field_validator("temperature")
@@ -132,12 +136,25 @@ class GenerationConfig(BaseModel):
             raise ValueError("temperature must be between 0 and 2")
         return v
 
-    @field_validator("max_tokens", "batch_size", "batch_timeout")
+    @field_validator("max_tokens", "batch_size", "batch_timeout", "max_retries")
     @classmethod
     def must_be_positive(cls, v: int, info) -> int:
         if v <= 0:
             raise ValueError(f"{info.field_name} must be positive")
         return v
+
+    @field_validator("max_workers")
+    @classmethod
+    def max_workers_positive(cls, v: int | None) -> int | None:
+        if v is not None and v <= 0:
+            raise ValueError("max_workers must be positive")
+        return v
+
+    def get_max_workers(self) -> int:
+        """Return configured max_workers, or auto-calculated value if None."""
+        if self.max_workers is not None:
+            return self.max_workers
+        return min(32, (os.cpu_count() or 1) * 4)
 
     def get_api_key(self) -> str | None:
         """Get the API key from the environment variable."""
@@ -154,6 +171,9 @@ class RefinementConfig(BaseModel):
     max_tokens: int = 1000
     batch_size: int = 40
     batch_timeout: int = 120
+    max_retries: int = 5
+    retry_backoff: list[int] = Field(default_factory=lambda: [2, 5, 10, 30, 60])
+    max_workers: int | None = None
     prompt: str = ""
 
     @field_validator("temperature")
@@ -163,12 +183,25 @@ class RefinementConfig(BaseModel):
             raise ValueError("temperature must be between 0 and 2")
         return v
 
-    @field_validator("max_tokens", "batch_size", "batch_timeout")
+    @field_validator("max_tokens", "batch_size", "batch_timeout", "max_retries")
     @classmethod
     def must_be_positive(cls, v: int, info) -> int:
         if v <= 0:
             raise ValueError(f"{info.field_name} must be positive")
         return v
+
+    @field_validator("max_workers")
+    @classmethod
+    def max_workers_positive(cls, v: int | None) -> int | None:
+        if v is not None and v <= 0:
+            raise ValueError("max_workers must be positive")
+        return v
+
+    def get_max_workers(self) -> int:
+        """Return configured max_workers, or auto-calculated value if None."""
+        if self.max_workers is not None:
+            return self.max_workers
+        return min(32, (os.cpu_count() or 1) * 4)
 
     def get_api_key(self) -> str | None:
         """Get the API key from the environment variable."""

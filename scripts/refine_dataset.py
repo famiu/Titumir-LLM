@@ -13,23 +13,19 @@ from training.config import RefinementConfig, load_config
 
 load_dotenv()
 
-MAX_WORKERS = min(32, (os.cpu_count() or 1) * 4)
-MAX_RETRIES = 5
-RETRY_BACKOFF = [2, 5, 10, 30, 60]
-
 
 def check_batch_with_retry(
     batch_idx: int,
     batch: list[dict],
     start: int,
-    llm_config: RefinementConfig,
+    llm_cfg: RefinementConfig,
     refinement_prompt: str,
     batch_timeout: int,
 ) -> tuple[int, list[dict], list[dict]]:
     """Check a single batch with retries. Returns (batch_idx, kept, removed_with_reasons)."""
-    api_key = llm_config.get_api_key()
+    api_key = llm_cfg.get_api_key()
     if not api_key:
-        raise ValueError(f"API key not found: set {llm_config.api_key_env} environment variable")
+        raise ValueError(f"API key not found: set {llm_cfg.api_key_env} environment variable")
 
     formatted = []
     for i, ex in enumerate(batch):
@@ -39,22 +35,22 @@ def check_batch_with_retry(
 
     prompt = "Check these training examples:\n\n" + "\n\n".join(formatted)
 
-    for attempt in range(MAX_RETRIES):
+    for attempt in range(llm_cfg.max_retries):
         try:
             response = requests.post(
-                llm_config.endpoint,
+                llm_cfg.endpoint,
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": llm_config.model,
+                    "model": llm_cfg.model,
                     "messages": [
                         {"role": "system", "content": refinement_prompt},
                         {"role": "user", "content": prompt},
                     ],
-                    "temperature": llm_config.temperature,
-                    "max_tokens": llm_config.max_tokens,
+                    "temperature": llm_cfg.temperature,
+                    "max_tokens": llm_cfg.max_tokens,
                     "reasoning": {"effort": "none"},
                 },
                 timeout=batch_timeout,
@@ -84,29 +80,35 @@ def check_batch_with_retry(
             return batch_idx, kept, removed
 
         except (json.JSONDecodeError, KeyError):
-            print(f"  [batch {batch_idx}] Parse failed — keeping entire batch")
-            return batch_idx, batch, []
+            wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)]
+            print(
+                f"  [batch {batch_idx}] Parse failed (attempt {attempt + 1}/{llm_cfg.max_retries}) — "
+                f"retrying in {wait}s"
+            )
+            time.sleep(llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)])
 
         except requests.exceptions.Timeout:
-            wait = RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)]
+            wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)]
             print(
                 f"  [batch {batch_idx}] Timed out after {batch_timeout}s "
-                f"(attempt {attempt + 1}/{MAX_RETRIES}) — retrying in {wait}s"
+                f"(attempt {attempt + 1}/{llm_cfg.max_retries}) — retrying in {wait}s"
             )
             time.sleep(wait)
 
         except requests.exceptions.ConnectionError:
-            wait = RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)]
-            print(f"  [batch {batch_idx}] Network error (attempt {attempt + 1}/{MAX_RETRIES}) — retrying in {wait}s")
+            wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)]
+            print(
+                f"  [batch {batch_idx}] Network error (attempt {attempt + 1}/{llm_cfg.max_retries}) — retrying in {wait}s"
+            )
             time.sleep(wait)
 
         except requests.HTTPError as e:
             if e.response.status_code == 429:
-                wait = RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)] * 2
+                wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)] * 2
                 print(f"  [batch {batch_idx}] Rate limited — retrying in {wait}s")
                 time.sleep(wait)
             elif e.response.status_code >= 500:
-                wait = RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)]
+                wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)]
                 print(f"  [batch {batch_idx}] Server error {e.response.status_code} — retrying in {wait}s")
                 time.sleep(wait)
             else:
@@ -117,7 +119,7 @@ def check_batch_with_retry(
             print(f"  [batch {batch_idx}] Unexpected error: {e} — keeping entire batch")
             return batch_idx, batch, []
 
-    print(f"  [batch {batch_idx}] All {MAX_RETRIES} retries exhausted — keeping entire batch")
+    print(f"  [batch {batch_idx}] All {llm_cfg.max_retries} retries exhausted — keeping entire batch")
     return batch_idx, batch, []
 
 
@@ -125,7 +127,7 @@ def refine_file(
     input_file: Path,
     refined_dir: str,
     removed_dir: str,
-    llm_config: RefinementConfig,
+    llm_cfg: RefinementConfig,
     refinement_prompt: str,
     batch_size: int,
     batch_timeout: int,
@@ -160,14 +162,14 @@ def refine_file(
     results_lock = Lock()
     completed = 0
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+    with ThreadPoolExecutor(max_workers=llm_cfg.get_max_workers()) as executor:
         futures = {
             executor.submit(
                 check_batch_with_retry,
                 idx,
                 batch,
                 start,
-                llm_config,
+                llm_cfg,
                 refinement_prompt,
                 batch_timeout,
             ): idx

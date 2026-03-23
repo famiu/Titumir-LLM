@@ -8,6 +8,7 @@ paths:
 model:
   name: "Qwen/Qwen3.5-9B"
   max_seq_length: 2048
+  load_in_4bit: True
 
 cpt_training:
   datasets:
@@ -59,6 +60,9 @@ generation:
   max_tokens: 4000
   batch_size: 20
   batch_timeout: 120
+  max_retries: 5
+  retry_backoff: [2, 5, 10, 30, 60]
+  max_workers: ~
   prompt: |
     Generate {n} Facebook post + comment pairs for Bengali LLM training data.
 
@@ -119,6 +123,9 @@ refinement:
   max_tokens: 1000
   batch_size: 40
   batch_timeout: 120
+  max_retries: 5
+  retry_backoff: [2, 5, 10, 30, 60]
+  max_workers: ~
   prompt: |
     You are a data quality checker for a Bengali LLM training dataset.
     You will receive a batch of training examples, each with an index, a post, and a comment.
