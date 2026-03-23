@@ -10,6 +10,30 @@ model:
   max_seq_length: 2048
 
 cpt_training:
+  datasets:
+    - path: "BanglishRev/bangla-english-and-code-mixed-ecommerce-review-dataset"
+      split: "train"
+      column: "review"
+      probability: 0.40
+    - path: "sanzanalora/Ben-Sarc"
+      split: "train"
+      column: "Comments"
+      probability: 0.25
+    - path: "allenai/c4"
+      split: "train[:60000]"
+      config: "bn"
+      column: "text"
+      probability: 0.20
+    - path: "statmt/cc100"
+      split: "train[:20000]"
+      config: "bn_rom"
+      column: "text"
+      probability: 0.10
+    - path: "wikimedia/wikipedia"
+      split: "train[:10000]"
+      config: "20231101.bn"
+      column: "text"
+      probability: 0.05
   max_examples: 500000
   output_dir: "./checkpoints/cpt"
   checkpoint: "./checkpoints/cpt_final"

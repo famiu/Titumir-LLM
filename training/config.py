@@ -33,9 +33,27 @@ class ModelConfig(BaseModel):
         return v
 
 
+class CPTDatasetEntry(BaseModel):
+    """A single dataset source for continued pretraining."""
+
+    path: str
+    split: str = "train"
+    config: str | None = None
+    column: str = "text"
+    probability: float
+
+    @field_validator("probability")
+    @classmethod
+    def probability_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("probability must be positive")
+        return v
+
+
 class CPTTrainingConfig(BaseModel):
     """Configuration for continued pretraining."""
 
+    datasets: list[CPTDatasetEntry] = Field(default_factory=list)
     max_examples: int = 500_000
     output_dir: str = "./checkpoints/cpt"
     checkpoint: str = "./checkpoints/cpt_final"
@@ -52,9 +70,14 @@ class CPTTrainingConfig(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def lora_alpha_gte_r(self) -> CPTTrainingConfig:
+    def validate_cpt(self) -> CPTTrainingConfig:
         if self.lora_alpha < self.lora_r:
             raise ValueError("lora_alpha must be >= lora_r")
+        if len(self.datasets) == 0:
+            raise ValueError("cpt_training.datasets must not be empty")
+        total = sum(d.probability for d in self.datasets)
+        if abs(total - 1.0) > 0.01:
+            raise ValueError(f"dataset probabilities must sum to 1.0, got {total}")
         return self
 
 
@@ -187,7 +210,7 @@ class Config(BaseModel):
 
     @model_validator(mode="after")
     def topics_required_if_generation(self) -> Config:
-        if self.topics is not None and len(self.topics) == 0 and self.generation.prompt:
+        if not self.topics and self.generation.prompt:
             raise ValueError("topics list must not be empty if generation prompt is configured")
         return self
 

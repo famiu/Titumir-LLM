@@ -97,7 +97,7 @@ All configuration is managed via `configs/config.yaml`. The config uses a nested
 
 - **paths** — Data directories and dataset paths
 - **model** — Base model name and sequence length
-- **cpt_training** — Continued pretraining settings (max examples, output/checkpoint dirs, LoRA params)
+- **cpt_training** — Continued pretraining settings (datasets, max examples, output/checkpoint dirs, LoRA params)
 - **sft_training** — Supervised finetuning settings (output/checkpoint dirs, LoRA params)
 - **generation** — Dataset generation LLM settings (endpoint, model, temperature, max tokens, batch size, timeout) and prompt template
 - **refinement** — Dataset refinement LLM settings (endpoint, model, temperature, max tokens, batch size, timeout) and prompt template
@@ -117,16 +117,6 @@ just export --config configs/custom.yaml
 ```
 
 See `configs/config.yaml` for the default configuration.
-
-## CPT Data Sources
-
-| Dataset | Type | Weight |
-|---|---|---|
-| BanglishRev | E-commerce reviews (Bengali/Banglish) | 40% |
-| Ben-Sarc | Facebook comments | 25% |
-| CC100 Bengali | Web text | 20% |
-| CC100 Bengali Romanized | Romanized web text | 10% |
-| Wikipedia Bengali | Formal prose | 5% |
 
 ## License
 

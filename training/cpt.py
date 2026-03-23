@@ -38,57 +38,26 @@ def run_cpt(config_path: str | None = None) -> None:
         random_state=42,
     )
 
-    # ── Colloquial / social media sources (priority) ───────────────────────
+    # ── Load and interleave datasets from config ─────────────────────────
+    loaded_datasets = []
+    probabilities = []
 
-    # BanglishRev — 1.74M e-commerce reviews in Bengali/English/Banglish
-    banglish_rev = load_dataset(
-        "BanglishRev/bangla-english-and-code-mixed-ecommerce-review-dataset",
-        split="train",
-    )
-    assert banglish_rev.column_names is not None
-    print(f"BanglishRev columns: {banglish_rev.column_names}")
-    banglish_rev = banglish_rev.map(
-        lambda x: {"text": x["review"]},
-        remove_columns=list(banglish_rev.column_names),
-    )
+    for entry in cpt_cfg.datasets:
+        load_kwargs = {}
+        if entry.config:
+            load_kwargs["name"] = entry.config
+        ds = load_dataset(entry.path, **load_kwargs, split=entry.split)
+        print(f"Loaded {entry.path} [{entry.split}]: {len(ds)} examples, columns: {ds.column_names}")
+        if entry.column != "text":
+            ds = ds.rename_column(entry.column, "text")
+        ds = ds.select_columns(["text"])
+        loaded_datasets.append(ds)
+        probabilities.append(entry.probability)
 
-    # Ben-Sarc — 25,636 Facebook comments
-    ben_sarc = load_dataset("sanzanalora/Ben-Sarc", split="train")
-    assert ben_sarc.column_names is not None
-    print(f"Ben-Sarc columns: {ben_sarc.column_names}")
-    ben_sarc = ben_sarc.map(
-        lambda x: {"text": x["Comments"]},
-        remove_columns=list(ben_sarc.column_names),
-    )
-
-    # CC100 Bengali — broad web text
-    cc100_bn = load_dataset("statmt/cc100", lang="bn", split="train[:60000]")
-    cc100_bn = cc100_bn.select_columns(["text"])
-
-    # CC100 Bengali Romanized — Banglish patterns
-    cc100_bn_rom = load_dataset("statmt/cc100", lang="bn_rom", split="train[:20000]")
-    cc100_bn_rom = cc100_bn_rom.select_columns(["text"])
-
-    # ── Formal sources (lower priority, foundation only) ───────────────────
-
-    # Wikipedia — formal Bengali, kept small to avoid register bias
-    wiki = load_dataset("wikimedia/wikipedia", "20231101.bn", split="train[:10000]")
-    assert wiki.column_names is not None
-    wiki = wiki.map(
-        lambda x: {"text": x["text"]},
-        remove_columns=list(wiki.column_names),
-    )
-
-    # ── Interleave with explicit sampling probabilities ────────────────────
-    # BanglishRev 40% — largest and most colloquial
-    # Ben-Sarc    25% — direct social media register
-    # CC100 bn    20% — broad colloquial web text
-    # CC100 rom   10% — Banglish romanization patterns
-    # Wikipedia    5% — formal foundation only
     raw_dataset = (
         interleave_datasets(
-            [banglish_rev, ben_sarc, cc100_bn, cc100_bn_rom, wiki],
-            probabilities=[0.40, 0.25, 0.20, 0.10, 0.05],
+            loaded_datasets,
+            probabilities=probabilities,
             seed=42,
             stopping_strategy="all_exhausted",
         )
