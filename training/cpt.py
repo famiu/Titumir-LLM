@@ -1,8 +1,8 @@
 import argparse
 
+from unsloth import FastLanguageModel  # isort: skip
 from datasets import interleave_datasets, load_dataset
 from trl import SFTConfig, SFTTrainer
-from unsloth import FastLanguageModel
 
 from training.config import load_config
 

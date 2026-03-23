@@ -2,9 +2,9 @@ import argparse
 import json
 from pathlib import Path
 
+from unsloth import FastLanguageModel  # isort: skip
 from datasets import Dataset, load_dataset
 from trl import SFTConfig, SFTTrainer
-from unsloth import FastLanguageModel
 
 from training.config import load_config
 
