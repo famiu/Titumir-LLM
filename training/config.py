@@ -128,18 +128,6 @@ class Config(BaseModel):
                 {"topic": t[0], "count": t[1]} if isinstance(t, list | tuple) else t for t in data["topics"]
             ]
 
-        if "prompts" in data:
-            prompts = data.pop("prompts")
-            if isinstance(prompts, dict):
-                if "generation" in prompts and "generation" not in data:
-                    if "generation" not in data:
-                        data["generation"] = {}
-                    data["generation"]["prompt"] = prompts["generation"]
-                if "refinement" in prompts and "refinement" not in data:
-                    if "refinement" not in data:
-                        data["refinement"] = {}
-                    data["refinement"]["prompt"] = prompts["refinement"]
-
         return cls.model_validate(data)
 
 

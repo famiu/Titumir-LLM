@@ -8,12 +8,11 @@ from huggingface_hub import login
 
 from training.config import load_config
 
-load_dotenv()
-login()
-
 
 def pull_dataset(config_path: str | None = None) -> None:
     """Pull dataset from HuggingFace Hub."""
+    load_dotenv()
+    login()
     config = load_config(config_path)
     dataset = load_dataset(config.paths.hf_dataset, split="train")
 

@@ -7,12 +7,11 @@ from huggingface_hub import login
 
 from training.config import load_config
 
-load_dotenv()
-login()
-
 
 def push_dataset(config_path: str | None = None) -> None:
     """Push dataset to HuggingFace Hub."""
+    load_dotenv()
+    login()
     config = load_config(config_path)
     dataset_path = config.paths.default_dataset
 
