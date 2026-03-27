@@ -20,7 +20,6 @@ def check_batch_with_retry(
     start: int,
     llm_cfg: RefinementConfig,
     refinement_prompt: str,
-    batch_timeout: int,
 ) -> tuple[int, list[dict], list[dict]]:
     """Check a single batch with retries. Returns (batch_idx, kept, removed_with_reasons)."""
     api_key = llm_cfg.get_api_key()
@@ -53,7 +52,7 @@ def check_batch_with_retry(
                     "max_tokens": llm_cfg.max_tokens,
                     "reasoning": {"effort": "none"},
                 },
-                timeout=batch_timeout,
+                timeout=llm_cfg.batch_timeout,
             )
             response.raise_for_status()
             raw = response.json()["choices"][0]["message"]["content"]
@@ -90,7 +89,7 @@ def check_batch_with_retry(
         except requests.exceptions.Timeout:
             wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)]
             print(
-                f"  [batch {batch_idx}] Timed out after {batch_timeout}s "
+                f"  [batch {batch_idx}] Timed out after {llm_cfg.batch_timeout}s "
                 f"(attempt {attempt + 1}/{llm_cfg.max_retries}) — retrying in {wait}s"
             )
             time.sleep(wait)
@@ -130,7 +129,6 @@ def refine_file(
     llm_cfg: RefinementConfig,
     refinement_prompt: str,
     batch_size: int,
-    batch_timeout: int,
 ) -> None:
     """Refine a single JSONL file."""
     kept_file = os.path.join(refined_dir, input_file.name)
@@ -171,7 +169,6 @@ def refine_file(
                 start,
                 llm_cfg,
                 refinement_prompt,
-                batch_timeout,
             ): idx
             for idx, batch, start in batches
         }
@@ -250,7 +247,6 @@ def refine_dataset(
             ref_cfg,
             ref_cfg.prompt,
             ref_cfg.batch_size,
-            ref_cfg.batch_timeout,
         )
         return
 
@@ -284,7 +280,6 @@ def refine_dataset(
                 ref_cfg,
                 ref_cfg.prompt,
                 ref_cfg.batch_size,
-                ref_cfg.batch_timeout,
             )
     except KeyboardInterrupt:
         print("\nInterrupted")

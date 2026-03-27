@@ -106,7 +106,54 @@ class SFTTrainingConfig(BaseModel):
         return v
 
 
-class GenerationConfig(BaseModel):
+class ApiConfigBase(BaseModel):
+    """Base configuration for LLM API calls."""
+
+    endpoint: str
+    api_key_env: str
+    model: str
+    temperature: float
+    max_tokens: int
+    batch_size: int
+    batch_timeout: int = 120
+    max_retries: int = 5
+    retry_backoff: list[int] = Field(default_factory=lambda: [2, 5, 10, 30, 60])
+    max_workers: int | None = None
+    prompt: str = ""
+
+    @field_validator("temperature")
+    @classmethod
+    def temperature_range(cls, v: float) -> float:
+        if v < 0 or v > 2:
+            raise ValueError("temperature must be between 0 and 2")
+        return v
+
+    @field_validator("max_tokens", "batch_size", "batch_timeout", "max_retries")
+    @classmethod
+    def must_be_positive(cls, v: int, info) -> int:
+        if v <= 0:
+            raise ValueError(f"{info.field_name} must be positive")
+        return v
+
+    @field_validator("max_workers")
+    @classmethod
+    def max_workers_positive(cls, v: int | None) -> int | None:
+        if v is not None and v <= 0:
+            raise ValueError("max_workers must be positive")
+        return v
+
+    def get_max_workers(self) -> int:
+        """Return configured max_workers, or auto-calculated value if None."""
+        if self.max_workers is not None:
+            return self.max_workers
+        return min(32, (os.cpu_count() or 1) * 4)
+
+    def get_api_key(self) -> str | None:
+        """Get the API key from the environment variable."""
+        return os.environ.get(self.api_key_env)
+
+
+class GenerationConfig(ApiConfigBase):
     """Configuration for dataset generation."""
 
     endpoint: str = "https://openrouter.ai/api/v1/chat/completions"
@@ -115,45 +162,9 @@ class GenerationConfig(BaseModel):
     temperature: float = 0.9
     max_tokens: int = 4000
     batch_size: int = 20
-    batch_timeout: int = 120
-    max_retries: int = 5
-    retry_backoff: list[int] = Field(default_factory=lambda: [2, 5, 10, 30, 60])
-    max_workers: int | None = None
-    prompt: str = ""
-
-    @field_validator("temperature")
-    @classmethod
-    def temperature_range(cls, v: float) -> float:
-        if v < 0 or v > 2:
-            raise ValueError("temperature must be between 0 and 2")
-        return v
-
-    @field_validator("max_tokens", "batch_size", "batch_timeout", "max_retries")
-    @classmethod
-    def must_be_positive(cls, v: int, info) -> int:
-        if v <= 0:
-            raise ValueError(f"{info.field_name} must be positive")
-        return v
-
-    @field_validator("max_workers")
-    @classmethod
-    def max_workers_positive(cls, v: int | None) -> int | None:
-        if v is not None and v <= 0:
-            raise ValueError("max_workers must be positive")
-        return v
-
-    def get_max_workers(self) -> int:
-        """Return configured max_workers, or auto-calculated value if None."""
-        if self.max_workers is not None:
-            return self.max_workers
-        return min(32, (os.cpu_count() or 1) * 4)
-
-    def get_api_key(self) -> str | None:
-        """Get the API key from the environment variable."""
-        return os.environ.get(self.api_key_env)
 
 
-class RefinementConfig(BaseModel):
+class RefinementConfig(ApiConfigBase):
     """Configuration for dataset refinement."""
 
     endpoint: str = "https://openrouter.ai/api/v1/chat/completions"
@@ -162,42 +173,6 @@ class RefinementConfig(BaseModel):
     temperature: float = 0.1
     max_tokens: int = 1000
     batch_size: int = 40
-    batch_timeout: int = 120
-    max_retries: int = 5
-    retry_backoff: list[int] = Field(default_factory=lambda: [2, 5, 10, 30, 60])
-    max_workers: int | None = None
-    prompt: str = ""
-
-    @field_validator("temperature")
-    @classmethod
-    def temperature_range(cls, v: float) -> float:
-        if v < 0 or v > 2:
-            raise ValueError("temperature must be between 0 and 2")
-        return v
-
-    @field_validator("max_tokens", "batch_size", "batch_timeout", "max_retries")
-    @classmethod
-    def must_be_positive(cls, v: int, info) -> int:
-        if v <= 0:
-            raise ValueError(f"{info.field_name} must be positive")
-        return v
-
-    @field_validator("max_workers")
-    @classmethod
-    def max_workers_positive(cls, v: int | None) -> int | None:
-        if v is not None and v <= 0:
-            raise ValueError("max_workers must be positive")
-        return v
-
-    def get_max_workers(self) -> int:
-        """Return configured max_workers, or auto-calculated value if None."""
-        if self.max_workers is not None:
-            return self.max_workers
-        return min(32, (os.cpu_count() or 1) * 4)
-
-    def get_api_key(self) -> str | None:
-        """Get the API key from the environment variable."""
-        return os.environ.get(self.api_key_env)
 
 
 class ExportConfig(BaseModel):

@@ -27,7 +27,6 @@ def generate_batch_with_retry(
     batch_num: int,
     llm_cfg: GenerationConfig,
     generation_prompt: str,
-    batch_timeout: int,
 ) -> list[dict]:
     """Generate a single batch with retries. Returns examples or raises on total failure."""
     api_key = llm_cfg.get_api_key()
@@ -49,7 +48,7 @@ def generate_batch_with_retry(
                     "max_tokens": llm_cfg.max_tokens,
                     "reasoning": {"effort": "none"},
                 },
-                timeout=batch_timeout,
+                timeout=llm_cfg.batch_timeout,
             )
             response.raise_for_status()
             raw = response.json()["choices"][0]["message"]["content"]
@@ -63,7 +62,7 @@ def generate_batch_with_retry(
         except requests.exceptions.Timeout:
             wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)]
             print(
-                f"  [topic {topic_idx} batch {batch_num}] Timed out after {batch_timeout}s "
+                f"  [topic {topic_idx} batch {batch_num}] Timed out after {llm_cfg.batch_timeout}s "
                 f"(attempt {attempt + 1}/{llm_cfg.max_retries}) — retrying in {wait}s"
             )
             time.sleep(wait)
@@ -122,7 +121,6 @@ def generate_topic(
     total_topics: int,
     llm_cfg: GenerationConfig,
     generation_prompt_template: str,
-    batch_timeout: int,
 ) -> list[dict]:
     """Generate all examples for a single topic sequentially."""
     print(f"\n[{topic_idx}/{total_topics}] Topic: {topic} ({examples_for_topic} examples)")
@@ -135,7 +133,7 @@ def generate_topic(
         print(f"  [topic {topic_idx}] Batch {batch_num} — requesting {n} examples...")
 
         generation_prompt = generation_prompt_template.format_map(_SafeDict(n=n, topic=topic))
-        batch = generate_batch_with_retry(topic_idx, batch_num, llm_cfg, generation_prompt, batch_timeout)
+        batch = generate_batch_with_retry(topic_idx, batch_num, llm_cfg, generation_prompt)
         valid = [
             {"messages": [{"role": m["role"], "content": m["content"]} for m in ex["messages"]]}
             for ex in batch
@@ -189,8 +187,6 @@ def generate_dataset(
     print(f"Output: {output_file}")
     print(f"Using LLM: {gen_cfg.model}")
 
-    results: dict[int, list[dict]] = {}
-
     with open(output_file, "w", encoding="utf-8") as f:
         try:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -204,7 +200,6 @@ def generate_dataset(
                         total_topics,
                         gen_cfg,
                         gen_cfg.prompt,
-                        gen_cfg.batch_timeout,
                     ): topic_idx
                     for topic_idx, topic_entry in enumerate(config.topics, 1)
                 }
@@ -214,7 +209,6 @@ def generate_dataset(
                     try:
                         examples = future.result()
                         with write_lock:
-                            results[topic_idx] = examples
                             for example in examples:
                                 f.write(json.dumps(example, ensure_ascii=False) + "\n")
                                 f.flush()
