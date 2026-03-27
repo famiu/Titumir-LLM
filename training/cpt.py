@@ -59,7 +59,7 @@ def run_cpt(config_path: str | None = None) -> None:
             loaded_datasets,
             probabilities=probabilities,
             seed=42,
-            stopping_strategy="all_exhausted",
+            stopping_strategy="all_exhausted_without_replacement",
         )
         .shuffle(seed=42)
         .select(range(cpt_cfg.max_examples))
