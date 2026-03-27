@@ -87,13 +87,11 @@ class SFTTrainingConfig(BaseModel):
 
     output_dir: str = "./checkpoints/sft"
     checkpoint: str = "./checkpoints/sft_final"
-    lora_r: int = 32
-    lora_alpha: int = 64
     batch_size: int = 4
     gradient_accumulation_steps: int = 4
     eval_split: float | None = None
 
-    @field_validator("lora_r", "batch_size", "gradient_accumulation_steps")
+    @field_validator("batch_size", "gradient_accumulation_steps")
     @classmethod
     def must_be_positive(cls, v: int, info) -> int:
         if v <= 0:
@@ -106,12 +104,6 @@ class SFTTrainingConfig(BaseModel):
         if v is not None and (v <= 0 or v >= 1):
             raise ValueError("eval_split must be between 0 and 1")
         return v
-
-    @model_validator(mode="after")
-    def lora_alpha_gte_r(self) -> SFTTrainingConfig:
-        if self.lora_alpha < self.lora_r:
-            raise ValueError("lora_alpha must be >= lora_r")
-        return self
 
 
 class GenerationConfig(BaseModel):

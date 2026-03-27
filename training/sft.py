@@ -22,25 +22,6 @@ def run_sft(config_path: str | None = None, use_local: bool = False) -> None:
         load_in_4bit=model_cfg.load_in_4bit,
     )
 
-    model = FastLanguageModel.get_peft_model(
-        model,
-        r=sft_cfg.lora_r,
-        target_modules=[
-            "q_proj",
-            "k_proj",
-            "v_proj",
-            "o_proj",
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-        ],
-        lora_alpha=sft_cfg.lora_alpha,
-        lora_dropout=0,
-        bias="none",
-        use_gradient_checkpointing="unsloth",
-        random_state=42,
-    )
-
     if use_local:
         local_path = Path(config.paths.local_dataset)
         if not local_path.exists():

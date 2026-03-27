@@ -98,7 +98,7 @@ All configuration is managed via `configs/config.yaml`. The config uses a nested
 - **paths** — Data directories and dataset paths
 - **model** — Base model configuration
 - **cpt_training** — Continued pretraining settings (datasets, max examples, output/checkpoint dirs, LoRA params)
-- **sft_training** — Supervised finetuning settings (output/checkpoint dirs, LoRA params)
+- **sft_training** — Supervised finetuning settings (output/checkpoint dirs)
 - **generation** — Dataset generation LLM settings (endpoint, model, temperature, max tokens, batch size, timeout, retry config) and prompt template
 - **refinement** — Dataset refinement LLM settings (endpoint, model, temperature, max tokens, batch size, timeout, retry config) and prompt template
 - **export** — Model export path and quantization method
