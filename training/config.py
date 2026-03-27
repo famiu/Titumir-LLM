@@ -117,7 +117,6 @@ class ApiConfigBase(BaseModel):
     batch_size: int
     batch_timeout: int = 120
     max_retries: int = 5
-    retry_backoff: list[int] = Field(default_factory=lambda: [2, 5, 10, 30, 60])
     max_workers: int | None = None
     prompt: str = ""
 

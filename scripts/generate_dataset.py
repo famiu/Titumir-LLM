@@ -4,6 +4,7 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from itertools import count
 from threading import Lock
 
 import requests
@@ -20,6 +21,14 @@ class _SafeDict(dict):
 
 
 load_dotenv()
+
+RETRY_BASE_DELAY = 2
+RETRY_MAX_DELAY = 120
+
+
+def _retry_delay(attempt: int) -> float:
+    """Exponential backoff: base * 2^attempt, capped at max."""
+    return min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
 
 
 def generate_batch_with_retry(
@@ -57,10 +66,10 @@ def generate_batch_with_retry(
 
         except json.JSONDecodeError as e:
             print(f"  [topic {topic_idx} batch {batch_num}] JSON parse failed: {e} — retrying...")
-            time.sleep(llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)])
+            time.sleep(_retry_delay(attempt))
 
         except requests.exceptions.Timeout:
-            wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)]
+            wait = _retry_delay(attempt)
             print(
                 f"  [topic {topic_idx} batch {batch_num}] Timed out after {llm_cfg.batch_timeout}s "
                 f"(attempt {attempt + 1}/{llm_cfg.max_retries}) — retrying in {wait}s"
@@ -68,7 +77,7 @@ def generate_batch_with_retry(
             time.sleep(wait)
 
         except requests.exceptions.ConnectionError:
-            wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)]
+            wait = _retry_delay(attempt)
             print(
                 f"  [topic {topic_idx} batch {batch_num}] Network error "
                 f"(attempt {attempt + 1}/{llm_cfg.max_retries}) — retrying in {wait}s"
@@ -77,11 +86,11 @@ def generate_batch_with_retry(
 
         except requests.HTTPError as e:
             if e.response.status_code == 429:
-                wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)] * 2
+                wait = _retry_delay(attempt + 1)
                 print(f"  [topic {topic_idx} batch {batch_num}] Rate limited — retrying in {wait}s")
                 time.sleep(wait)
             elif e.response.status_code >= 500:
-                wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)]
+                wait = _retry_delay(attempt)
                 print(
                     f"  [topic {topic_idx} batch {batch_num}] Server error {e.response.status_code} "
                     f"— retrying in {wait}s"
@@ -93,7 +102,7 @@ def generate_batch_with_retry(
 
         except Exception as e:
             print(f"  [topic {topic_idx} batch {batch_num}] Unexpected error: {e} — retrying...")
-            time.sleep(llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)])
+            time.sleep(_retry_delay(attempt))
 
     print(f"  [topic {topic_idx} batch {batch_num}] All retries exhausted — skipping batch")
     return []
@@ -121,16 +130,16 @@ def generate_topic(
     total_topics: int,
     llm_cfg: GenerationConfig,
     generation_prompt_template: str,
+    global_batch_counter: count,
 ) -> list[dict]:
     """Generate all examples for a single topic sequentially."""
     print(f"\n[{topic_idx}/{total_topics}] Topic: {topic} ({examples_for_topic} examples)")
     topic_examples = []
-    batch_num = 0
 
     while len(topic_examples) < examples_for_topic:
-        batch_num += 1
+        batch_num = next(global_batch_counter)
         n = min(examples_for_topic - len(topic_examples), batch_size)
-        print(f"  [topic {topic_idx}] Batch {batch_num} — requesting {n} examples...")
+        print(f"  Batch #{batch_num} [topic {topic_idx}] — requesting {n} examples...")
 
         generation_prompt = generation_prompt_template.format_map(_SafeDict(n=n, topic=topic))
         batch = generate_batch_with_retry(topic_idx, batch_num, llm_cfg, generation_prompt)
@@ -190,6 +199,7 @@ def generate_dataset(
     with open(output_file, "w", encoding="utf-8") as f:
         try:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                global_batch_counter = count(1)
                 futures = {
                     executor.submit(
                         generate_topic,
@@ -200,6 +210,7 @@ def generate_dataset(
                         total_topics,
                         gen_cfg,
                         gen_cfg.prompt,
+                        global_batch_counter,
                     ): topic_idx
                     for topic_idx, topic_entry in enumerate(config.topics, 1)
                 }
@@ -211,8 +222,8 @@ def generate_dataset(
                         with write_lock:
                             for example in examples:
                                 f.write(json.dumps(example, ensure_ascii=False) + "\n")
-                                f.flush()
                                 total_written += 1
+                            f.flush()
                         print(f"  Topic {topic_idx} written — {len(examples)} examples ({total_written} total so far)")
                     except Exception as e:
                         print(f"  Topic {topic_idx} failed: {e}")

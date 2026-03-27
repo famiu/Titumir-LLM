@@ -13,6 +13,14 @@ from training.config import RefinementConfig, load_config
 
 load_dotenv()
 
+RETRY_BASE_DELAY = 2
+RETRY_MAX_DELAY = 120
+
+
+def _retry_delay(attempt: int) -> float:
+    """Exponential backoff: base * 2^attempt, capped at max."""
+    return min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
+
 
 def check_batch_with_retry(
     batch_idx: int,
@@ -79,15 +87,15 @@ def check_batch_with_retry(
             return batch_idx, kept, removed
 
         except (json.JSONDecodeError, KeyError):
-            wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)]
+            wait = _retry_delay(attempt)
             print(
                 f"  [batch {batch_idx}] Parse failed (attempt {attempt + 1}/{llm_cfg.max_retries}) — "
                 f"retrying in {wait}s"
             )
-            time.sleep(llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)])
+            time.sleep(wait)
 
         except requests.exceptions.Timeout:
-            wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)]
+            wait = _retry_delay(attempt)
             print(
                 f"  [batch {batch_idx}] Timed out after {llm_cfg.batch_timeout}s "
                 f"(attempt {attempt + 1}/{llm_cfg.max_retries}) — retrying in {wait}s"
@@ -95,7 +103,7 @@ def check_batch_with_retry(
             time.sleep(wait)
 
         except requests.exceptions.ConnectionError:
-            wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)]
+            wait = _retry_delay(attempt)
             print(
                 f"  [batch {batch_idx}] Network error (attempt {attempt + 1}/{llm_cfg.max_retries}) — retrying in {wait}s"
             )
@@ -103,11 +111,11 @@ def check_batch_with_retry(
 
         except requests.HTTPError as e:
             if e.response.status_code == 429:
-                wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)] * 2
+                wait = _retry_delay(attempt + 1)
                 print(f"  [batch {batch_idx}] Rate limited — retrying in {wait}s")
                 time.sleep(wait)
             elif e.response.status_code >= 500:
-                wait = llm_cfg.retry_backoff[min(attempt, len(llm_cfg.retry_backoff) - 1)]
+                wait = _retry_delay(attempt)
                 print(f"  [batch {batch_idx}] Server error {e.response.status_code} — retrying in {wait}s")
                 time.sleep(wait)
             else:
