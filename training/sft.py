@@ -64,7 +64,7 @@ def run_sft(config_path: str | None = None, use_local: bool = False) -> None:
             learning_rate=sft_cfg.learning_rate,
             num_train_epochs=sft_cfg.epochs,
             per_device_train_batch_size=sft_cfg.batch_size,
-            gradient_accumulation_steps=sft_cfg.gradient_accumulation_steps,
+            gradient_accumulation_steps=sft_cfg.grad_accum,
             bf16=True,
             logging_steps=10,
             save_steps=50,

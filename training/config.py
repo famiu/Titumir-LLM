@@ -63,9 +63,9 @@ class CPTTrainingConfig(BaseModel):
     lora_r: int = 16
     lora_alpha: int = 32
     batch_size: int = 4
-    gradient_accumulation_steps: int = 4
+    grad_accum: int = 4
 
-    @field_validator("max_examples", "lora_r", "batch_size", "gradient_accumulation_steps", "epochs")
+    @field_validator("max_examples", "lora_r", "batch_size", "grad_accum", "epochs")
     @classmethod
     def must_be_positive(cls, v: int, info) -> int:
         if v <= 0:
@@ -99,10 +99,10 @@ class SFTTrainingConfig(BaseModel):
     learning_rate: float = 2e-4
     epochs: int = 3
     batch_size: int = 4
-    gradient_accumulation_steps: int = 4
+    grad_accum: int = 4
     eval_split: float | None = None
 
-    @field_validator("batch_size", "gradient_accumulation_steps", "epochs")
+    @field_validator("batch_size", "grad_accum", "epochs")
     @classmethod
     def must_be_positive(cls, v: int, info) -> int:
         if v <= 0:

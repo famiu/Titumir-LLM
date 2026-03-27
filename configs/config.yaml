@@ -43,7 +43,7 @@ cpt_training:
   lora_r: 16
   lora_alpha: 32
   batch_size: 4
-  gradient_accumulation_steps: 4
+  grad_accum: 4
 
 sft_training:
   output_dir: "./checkpoints/sft"
@@ -51,7 +51,7 @@ sft_training:
   learning_rate: 2e-4
   epochs: 3
   batch_size: 4
-  gradient_accumulation_steps: 4
+  grad_accum: 4
   eval_split: 0.1
 
 generation:
