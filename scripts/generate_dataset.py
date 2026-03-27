@@ -1,111 +1,14 @@
 import argparse
 import json
 import os
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from itertools import count
 from threading import Lock
 
-import requests
-from dotenv import load_dotenv
+from _llm import SafeDict, call_llm
 
-from training.config import GenerationConfig, load_config
-
-
-class _SafeDict(dict):
-    """Dict that returns {key} for missing keys, for safe str.format_map."""
-
-    def __missing__(self, key):
-        return "{" + key + "}"
-
-
-load_dotenv()
-
-RETRY_BASE_DELAY = 2
-RETRY_MAX_DELAY = 120
-
-
-def _retry_delay(attempt: int) -> float:
-    """Exponential backoff: base * 2^attempt, capped at max."""
-    return min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
-
-
-def generate_batch_with_retry(
-    topic_idx: int,
-    batch_num: int,
-    llm_cfg: GenerationConfig,
-    generation_prompt: str,
-) -> list[dict]:
-    """Generate a single batch with retries. Returns examples or raises on total failure."""
-    api_key = llm_cfg.get_api_key()
-    if not api_key:
-        raise ValueError(f"API key not found: set {llm_cfg.api_key_env} environment variable")
-
-    for attempt in range(llm_cfg.max_retries):
-        try:
-            response = requests.post(
-                llm_cfg.endpoint,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": llm_cfg.model,
-                    "messages": [{"role": "user", "content": generation_prompt}],
-                    "temperature": llm_cfg.temperature,
-                    "max_tokens": llm_cfg.max_tokens,
-                    "reasoning": {"effort": "none"},
-                },
-                timeout=llm_cfg.batch_timeout,
-            )
-            response.raise_for_status()
-            raw = response.json()["choices"][0]["message"]["content"]
-            cleaned = raw.replace("```json", "").replace("```", "").strip()
-            return json.loads(cleaned)
-
-        except json.JSONDecodeError as e:
-            print(f"  [topic {topic_idx} batch {batch_num}] JSON parse failed: {e} — retrying...")
-            time.sleep(_retry_delay(attempt))
-
-        except requests.exceptions.Timeout:
-            wait = _retry_delay(attempt)
-            print(
-                f"  [topic {topic_idx} batch {batch_num}] Timed out after {llm_cfg.batch_timeout}s "
-                f"(attempt {attempt + 1}/{llm_cfg.max_retries}) — retrying in {wait}s"
-            )
-            time.sleep(wait)
-
-        except requests.exceptions.ConnectionError:
-            wait = _retry_delay(attempt)
-            print(
-                f"  [topic {topic_idx} batch {batch_num}] Network error "
-                f"(attempt {attempt + 1}/{llm_cfg.max_retries}) — retrying in {wait}s"
-            )
-            time.sleep(wait)
-
-        except requests.HTTPError as e:
-            if e.response.status_code == 429:
-                wait = _retry_delay(attempt + 1)
-                print(f"  [topic {topic_idx} batch {batch_num}] Rate limited — retrying in {wait}s")
-                time.sleep(wait)
-            elif e.response.status_code >= 500:
-                wait = _retry_delay(attempt)
-                print(
-                    f"  [topic {topic_idx} batch {batch_num}] Server error {e.response.status_code} "
-                    f"— retrying in {wait}s"
-                )
-                time.sleep(wait)
-            else:
-                print(f"  [topic {topic_idx} batch {batch_num}] Client error {e.response.status_code} — skipping batch")
-                return []
-
-        except Exception as e:
-            print(f"  [topic {topic_idx} batch {batch_num}] Unexpected error: {e} — retrying...")
-            time.sleep(_retry_delay(attempt))
-
-    print(f"  [topic {topic_idx} batch {batch_num}] All retries exhausted — skipping batch")
-    return []
+from training.config import load_config
 
 
 def is_valid_example(example: dict) -> bool:
@@ -128,7 +31,7 @@ def generate_topic(
     examples_for_topic: int,
     batch_size: int,
     total_topics: int,
-    llm_cfg: GenerationConfig,
+    llm_cfg,
     generation_prompt_template: str,
     global_batch_counter: count,
 ) -> list[dict]:
@@ -141,8 +44,13 @@ def generate_topic(
         n = min(examples_for_topic - len(topic_examples), batch_size)
         print(f"  Batch #{batch_num} [topic {topic_idx}] — requesting {n} examples...")
 
-        generation_prompt = generation_prompt_template.format_map(_SafeDict(n=n, topic=topic))
-        batch = generate_batch_with_retry(topic_idx, batch_num, llm_cfg, generation_prompt)
+        generation_prompt = generation_prompt_template.format_map(SafeDict(n=n, topic=topic))
+        batch = call_llm(llm_cfg, [{"role": "user", "content": generation_prompt}])
+
+        if batch is None:
+            print(f"  Batch #{batch_num} [topic {topic_idx}] failed — skipping")
+            break
+
         valid = [
             {"messages": [{"role": m["role"], "content": m["content"]} for m in ex["messages"]]}
             for ex in batch
@@ -155,9 +63,6 @@ def generate_topic(
 
         topic_examples.extend(valid)
         print(f"  [topic {topic_idx}] {len(topic_examples)}/{examples_for_topic} collected")
-
-        if len(topic_examples) < examples_for_topic:
-            time.sleep(3)
 
     return topic_examples[:examples_for_topic]
 

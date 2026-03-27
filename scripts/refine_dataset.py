@@ -1,25 +1,13 @@
 import argparse
 import json
 import os
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
 
-import requests
-from dotenv import load_dotenv
+from _llm import call_llm
 
 from training.config import RefinementConfig, load_config
-
-load_dotenv()
-
-RETRY_BASE_DELAY = 2
-RETRY_MAX_DELAY = 120
-
-
-def _retry_delay(attempt: int) -> float:
-    """Exponential backoff: base * 2^attempt, capped at max."""
-    return min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
 
 
 def check_batch_with_retry(
@@ -30,104 +18,48 @@ def check_batch_with_retry(
     refinement_prompt: str,
 ) -> tuple[int, list[dict], list[dict]]:
     """Check a single batch with retries. Returns (batch_idx, kept, removed_with_reasons)."""
-    api_key = llm_cfg.get_api_key()
-    if not api_key:
-        raise ValueError(f"API key not found: set {llm_cfg.api_key_env} environment variable")
-
     formatted = []
     for i, ex in enumerate(batch):
         post = ex["messages"][0]["content"]
         comment = ex["messages"][1]["content"]
-        formatted.append(f"[{i}] Post: {post[:200]}\n    Comment: {comment[:200]}")
+        formatted.append(f"[{i}] Post: {post}\n    Comment: {comment}")
 
     prompt = "Check these training examples:\n\n" + "\n\n".join(formatted)
 
-    for attempt in range(llm_cfg.max_retries):
-        try:
-            response = requests.post(
-                llm_cfg.endpoint,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": llm_cfg.model,
-                    "messages": [
-                        {"role": "system", "content": refinement_prompt},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": llm_cfg.temperature,
-                    "max_tokens": llm_cfg.max_tokens,
-                    "reasoning": {"effort": "none"},
-                },
-                timeout=llm_cfg.batch_timeout,
+    result = call_llm(
+        llm_cfg,
+        [
+            {"role": "system", "content": refinement_prompt},
+            {"role": "user", "content": prompt},
+        ],
+    )
+
+    if result is None:
+        print(f"  [batch {batch_idx}] LLM call failed — keeping entire batch")
+        return batch_idx, batch, []
+
+    try:
+        remove_indices = set(result.get("remove", []))
+        reasons = result.get("reasons", {})
+    except (AttributeError, TypeError):
+        print(f"  [batch {batch_idx}] Unexpected response format — keeping entire batch")
+        return batch_idx, batch, []
+
+    kept = []
+    removed = []
+    for i, example in enumerate(batch):
+        if i in remove_indices:
+            removed.append(
+                {
+                    "example": example,
+                    "reason": reasons.get(str(i), "no reason given"),
+                    "global_idx": start + i,
+                }
             )
-            response.raise_for_status()
-            raw = response.json()["choices"][0]["message"]["content"]
-            cleaned = raw.replace("```json", "").replace("```", "").strip()
-            result = json.loads(cleaned)
+        else:
+            kept.append(example)
 
-            remove_indices = set(result.get("remove", []))
-            reasons = result.get("reasons", {})
-
-            kept = []
-            removed = []
-            for i, example in enumerate(batch):
-                if i in remove_indices:
-                    removed.append(
-                        {
-                            "example": example,
-                            "reason": reasons.get(str(i), "no reason given"),
-                            "global_idx": start + i,
-                        }
-                    )
-                else:
-                    kept.append(example)
-
-            return batch_idx, kept, removed
-
-        except (json.JSONDecodeError, KeyError):
-            wait = _retry_delay(attempt)
-            print(
-                f"  [batch {batch_idx}] Parse failed (attempt {attempt + 1}/{llm_cfg.max_retries}) — "
-                f"retrying in {wait}s"
-            )
-            time.sleep(wait)
-
-        except requests.exceptions.Timeout:
-            wait = _retry_delay(attempt)
-            print(
-                f"  [batch {batch_idx}] Timed out after {llm_cfg.batch_timeout}s "
-                f"(attempt {attempt + 1}/{llm_cfg.max_retries}) — retrying in {wait}s"
-            )
-            time.sleep(wait)
-
-        except requests.exceptions.ConnectionError:
-            wait = _retry_delay(attempt)
-            print(
-                f"  [batch {batch_idx}] Network error (attempt {attempt + 1}/{llm_cfg.max_retries}) — retrying in {wait}s"
-            )
-            time.sleep(wait)
-
-        except requests.HTTPError as e:
-            if e.response.status_code == 429:
-                wait = _retry_delay(attempt + 1)
-                print(f"  [batch {batch_idx}] Rate limited — retrying in {wait}s")
-                time.sleep(wait)
-            elif e.response.status_code >= 500:
-                wait = _retry_delay(attempt)
-                print(f"  [batch {batch_idx}] Server error {e.response.status_code} — retrying in {wait}s")
-                time.sleep(wait)
-            else:
-                print(f"  [batch {batch_idx}] Client error {e.response.status_code} — keeping entire batch")
-                return batch_idx, batch, []
-
-        except Exception as e:
-            print(f"  [batch {batch_idx}] Unexpected error: {e} — keeping entire batch")
-            return batch_idx, batch, []
-
-    print(f"  [batch {batch_idx}] All {llm_cfg.max_retries} retries exhausted — keeping entire batch")
-    return batch_idx, batch, []
+    return batch_idx, kept, removed
 
 
 def refine_file(
