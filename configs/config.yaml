@@ -38,6 +38,8 @@ cpt_training:
   max_examples: 500000
   output_dir: "./checkpoints/cpt"
   checkpoint: "./checkpoints/cpt_final"
+  learning_rate: 5e-6
+  epochs: 1
   lora_r: 16
   lora_alpha: 32
   batch_size: 4
@@ -46,6 +48,8 @@ cpt_training:
 sft_training:
   output_dir: "./checkpoints/sft"
   checkpoint: "./checkpoints/sft_final"
+  learning_rate: 2e-4
+  epochs: 3
   batch_size: 4
   gradient_accumulation_steps: 4
   eval_split: 0.1

@@ -58,16 +58,25 @@ class CPTTrainingConfig(BaseModel):
     max_examples: int = 500_000
     output_dir: str = "./checkpoints/cpt"
     checkpoint: str = "./checkpoints/cpt_final"
+    learning_rate: float = 5e-6
+    epochs: int = 1
     lora_r: int = 16
     lora_alpha: int = 32
     batch_size: int = 4
     gradient_accumulation_steps: int = 4
 
-    @field_validator("max_examples", "lora_r", "batch_size", "gradient_accumulation_steps")
+    @field_validator("max_examples", "lora_r", "batch_size", "gradient_accumulation_steps", "epochs")
     @classmethod
     def must_be_positive(cls, v: int, info) -> int:
         if v <= 0:
             raise ValueError(f"{info.field_name} must be positive")
+        return v
+
+    @field_validator("learning_rate")
+    @classmethod
+    def learning_rate_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("learning_rate must be positive")
         return v
 
     @model_validator(mode="after")
@@ -87,15 +96,24 @@ class SFTTrainingConfig(BaseModel):
 
     output_dir: str = "./checkpoints/sft"
     checkpoint: str = "./checkpoints/sft_final"
+    learning_rate: float = 2e-4
+    epochs: int = 3
     batch_size: int = 4
     gradient_accumulation_steps: int = 4
     eval_split: float | None = None
 
-    @field_validator("batch_size", "gradient_accumulation_steps")
+    @field_validator("batch_size", "gradient_accumulation_steps", "epochs")
     @classmethod
     def must_be_positive(cls, v: int, info) -> int:
         if v <= 0:
             raise ValueError(f"{info.field_name} must be positive")
+        return v
+
+    @field_validator("learning_rate")
+    @classmethod
+    def learning_rate_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("learning_rate must be positive")
         return v
 
     @field_validator("eval_split")
