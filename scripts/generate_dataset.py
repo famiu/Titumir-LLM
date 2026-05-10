@@ -6,8 +6,7 @@ from datetime import datetime
 from itertools import count
 from threading import Lock
 
-from _llm import SafeDict, call_llm
-
+from scripts._llm import SafeDict, call_llm
 from training.config import load_config
 
 

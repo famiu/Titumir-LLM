@@ -17,12 +17,14 @@
 - `just generate-dataset` — generate synthetic SFT data
 - `just refine-dataset` — LLM-based quality filtering
 - `just merge-dataset` — deduplicate + merge refined JSONLs
+- `just test` — run test suite
 - All training/data commands accept `--config <path>`
 
 ## Project Structure
 ```
 training/        config.py, cpt.py, sft.py, export_to_gguf.py
 scripts/         generate, refine, merge, push, pull, check_tokenizer
+tests/           config/, scripts/, training/; fixtures/ (sample JSONLs)
 configs/         YAML config files
 data/            unprocessed/, refined/, removed/
 ```
@@ -36,10 +38,12 @@ data/            unprocessed/, refined/, removed/
 - Scripts use `argparse` with `-c`/`--config` argument
 - Comments only when necessary — don't over-comment, but use them where intent isn't obvious
 - Use semantic commit messages (https://www.conventionalcommits.org/en/v1.0.0/)
+- Tests use `pytest`, `responses` (HTTP mocking), and `unittest.mock`; fixtures live in `tests/conftest.py` and `tests/fixtures/`
 
 ## Boundaries
 ### Always do
-- Run `just lint` before finishing any change
+- Run `just lint` and `just test` before finishing any change
+- Add tests for new functionality or bug fixes when appropriate
 - Update all YAML files in `configs/` when adding or changing config fields
 - Update README.md when user-facing workflow changes (new commands, changed flags, new config fields)
 - Update AGENTS.md when conventions or commands change

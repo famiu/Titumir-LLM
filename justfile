@@ -64,3 +64,7 @@ check-tokenizer *args:
 lint:
     uv run ruff check .
     uv run ruff format .
+
+# Run all tests
+test *args:
+    uv run pytest tests/ {{args}}

@@ -5,8 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
 
-from _llm import call_llm
-
+from scripts._llm import call_llm
 from training.config import RefinementConfig, load_config
 
 

@@ -37,7 +37,15 @@ dependencies = [
 dev = [
     "basedpyright>=1.29.0,<2",
     "ruff>=0.9.4,<0.10",
+    "pytest>=8.0,<9",
+    "responses>=0.25,<1",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
+filterwarnings = ["ignore::DeprecationWarning"]
+pythonpath = ["."]
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -96,7 +104,7 @@ select = [
     "SIM",
     "UP",
 ]
-ignore = ["D417", "D100", "D102", "E501", "E402"]
+ignore = ["D417", "D100", "D102", "D101", "D103", "E501", "E402", "E741", "SIM115"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

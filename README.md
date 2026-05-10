@@ -117,6 +117,9 @@ just check-tokenizer
 
 # Lint and format
 just lint
+
+# Run tests
+just test
 ```
 
 ## Configuration
