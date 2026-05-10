@@ -10,24 +10,25 @@ from trl import SFTConfig, SFTTrainer
 from training.config import load_config
 
 
-def run_sft(config_path: str | None = None) -> None:
+def run_sft(config_path: str | None = None, model=None, tokenizer=None) -> tuple:
     """Run supervised finetuning on conversational dataset."""
     config = load_config(config_path)
     model_cfg = config.model
     cpt_cfg = config.cpt_training
     sft_cfg = config.sft_training
 
-    if not os.path.isdir(cpt_cfg.checkpoint):
-        raise FileNotFoundError(
-            f"CPT checkpoint not found at '{cpt_cfg.checkpoint}'. "
-            "Run 'just cpt' first or set 'cpt_training.checkpoint' in your config."
-        )
+    if model is None or tokenizer is None:
+        if not os.path.isdir(cpt_cfg.checkpoint):
+            raise FileNotFoundError(
+                f"CPT checkpoint not found at '{cpt_cfg.checkpoint}'. "
+                "Run 'just cpt' first or set 'cpt_training.checkpoint' in your config."
+            )
 
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=cpt_cfg.checkpoint,
-        max_seq_length=model_cfg.max_seq_length,
-        load_in_4bit=model_cfg.load_in_4bit,
-    )
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=cpt_cfg.checkpoint,
+            max_seq_length=model_cfg.max_seq_length,
+            load_in_4bit=model_cfg.load_in_4bit,
+        )
 
     local_path = Path(config.profile.local_dataset)
     if local_path.exists():
@@ -100,6 +101,8 @@ def run_sft(config_path: str | None = None) -> None:
     model.save_pretrained(sft_cfg.checkpoint)
     tokenizer.save_pretrained(sft_cfg.checkpoint)
     print(f"SFT complete — saved to {sft_cfg.checkpoint}")
+
+    return model, tokenizer
 
 
 if __name__ == "__main__":

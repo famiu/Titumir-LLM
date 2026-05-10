@@ -25,11 +25,15 @@ output suitable for persona-driven conversational agents.
 
 ## Setup
 
+### Dependencies
+
 ```bash
 git clone https://github.com/famiuhaque/titumir-llm
 cd titumir-llm
 uv sync
 ```
+
+### Environment Variables
 
 Copy the example env file and fill in your API keys:
 ```bash
@@ -40,7 +44,14 @@ cp .env.example .env
 ```bash
 OPENROUTER_API_KEY="sk-or-..."
 HF_TOKEN="hf_..."
+# UNSLOTH_LLAMA_CPP_PATH="/path/to/llama.cpp"
 ```
+
+| Variable | Purpose |
+|----------|---------|
+| `OPENROUTER_API_KEY` | Data generation & refinement via OpenRouter |
+| `HF_TOKEN` | Push/pull datasets to/from HuggingFace Hub |
+| `UNSLOTH_LLAMA_CPP_PATH` | Pre-built llama.cpp path for GGUF export, built by Unsloth automatically if unset |
 
 ## Usage
 

@@ -6,9 +6,7 @@ default:
 
 # Run full training pipeline: CPT → SFT → export
 train *args:
-    just cpt {{args}}
-    just sft {{args}}
-    just export {{args}}
+    uv run training/train.py {{args}}
 
 # Run dry-run pipeline. Pass --regenerate/-r to regenerate the test dataset first.
 [arg("regenerate", long="regenerate", short="r", value="true")]

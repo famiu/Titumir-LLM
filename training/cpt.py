@@ -7,17 +7,18 @@ from trl import SFTConfig, SFTTrainer
 from training.config import load_config
 
 
-def run_cpt(config_path: str | None = None) -> None:
+def run_cpt(config_path: str | None = None, model=None, tokenizer=None) -> tuple:
     """Run continued pretraining on raw Bengali text, prioritizing colloquial sources."""
     config = load_config(config_path)
     model_cfg = config.model
     cpt_cfg = config.cpt_training
 
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=model_cfg.name,
-        max_seq_length=model_cfg.max_seq_length,
-        load_in_4bit=model_cfg.load_in_4bit,
-    )
+    if model is None or tokenizer is None:
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=model_cfg.name,
+            max_seq_length=model_cfg.max_seq_length,
+            load_in_4bit=model_cfg.load_in_4bit,
+        )
 
     model = FastLanguageModel.get_peft_model(
         model,
@@ -101,6 +102,8 @@ def run_cpt(config_path: str | None = None) -> None:
     model.save_pretrained(cpt_cfg.checkpoint)
     tokenizer.save_pretrained(cpt_cfg.checkpoint)
     print(f"CPT complete — saved to {cpt_cfg.checkpoint}")
+
+    return model, tokenizer
 
 
 if __name__ == "__main__":
