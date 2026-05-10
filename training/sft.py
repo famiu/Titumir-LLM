@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 from pathlib import Path
 
 from unsloth import FastLanguageModel  # isort: skip
@@ -16,6 +17,12 @@ def run_sft(config_path: str | None = None, use_local: bool = False) -> None:
     cpt_cfg = config.cpt_training
     sft_cfg = config.sft_training
 
+    if not os.path.isdir(cpt_cfg.checkpoint):
+        raise FileNotFoundError(
+            f"CPT checkpoint not found at '{cpt_cfg.checkpoint}'. "
+            "Run 'just cpt' first or set 'cpt_training.checkpoint' in your config."
+        )
+
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=cpt_cfg.checkpoint,
         max_seq_length=model_cfg.max_seq_length,
@@ -31,7 +38,14 @@ def run_sft(config_path: str | None = None, use_local: bool = False) -> None:
         print(f"Loaded {len(data)} examples from {local_path}")
         dataset = Dataset.from_list(data)
     else:
-        dataset = load_dataset(config.paths.hf_dataset, split="train")
+        try:
+            dataset = load_dataset(config.paths.hf_dataset, split="train")
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to load dataset '{config.paths.hf_dataset}' from HuggingFace Hub. "
+                "Check your internet connection and HF_TOKEN. "
+                "Use '--local' to load from a local file instead."
+            ) from e
         print(f"Loaded {len(dataset)} examples from {config.paths.hf_dataset}")
 
     def format_example(example: dict) -> dict:

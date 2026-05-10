@@ -46,7 +46,13 @@ def run_cpt(config_path: str | None = None) -> None:
         load_kwargs = {}
         if entry.config:
             load_kwargs["name"] = entry.config
-        ds = load_dataset(entry.path, **load_kwargs, split=entry.split)
+        try:
+            ds = load_dataset(entry.path, **load_kwargs, split=entry.split)
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to load CPT dataset '{entry.path}' (split={entry.split}, config={entry.config}). "
+                "Check your internet connection and that the dataset exists."
+            ) from e
         print(f"Loaded {entry.path} [{entry.split}]: {len(ds)} examples, columns: {ds.column_names}")
         if entry.column != "text":
             ds = ds.rename_column(entry.column, "text")
