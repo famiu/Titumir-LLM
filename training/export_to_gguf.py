@@ -28,7 +28,7 @@ def export_gguf(config_path: str | None = None, model=None, tokenizer=None) -> N
         tokenizer,
         quantization_method=export_cfg.quantization_method,
     )
-    print(f"Export complete — {export_cfg.path}.{export_cfg.quantization_method}.gguf")
+    print(f"Export complete — {export_cfg.path}_gguf/")
 
 
 if __name__ == "__main__":

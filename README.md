@@ -4,6 +4,9 @@ A Bengali language finetuning pipeline for Qwen3.5 9B, optimized for colloquial
 Bangladeshi speech including Bengali script, romanized Bengali, and Banglish
 code-switching.
 
+> [!CAUTION]
+> Training a model using outputs from another model (knowledge distillation) may violate the base model's terms of service and is legally dubious. This project is designed for fine-tuning on independently sourced data or distilling from models that explicitly allow it, not distillation from proprietary models. Anyone using this project for distillation does so entirely at their own risk.
+
 ## Overview
 
 Titumir is a two-stage finetuning pipeline:
@@ -36,26 +39,29 @@ uv sync
 ### Environment Variables
 
 Copy the example env file and fill in your API keys:
+
 ```bash
 cp .env.example .env
 ```
 
 `.env`:
+
 ```bash
 OPENROUTER_API_KEY="sk-or-..."
 HF_TOKEN="hf_..."
 # UNSLOTH_LLAMA_CPP_PATH="/path/to/llama.cpp"
 ```
 
-| Variable | Purpose |
-|----------|---------|
-| `OPENROUTER_API_KEY` | Data generation & refinement via OpenRouter |
-| `HF_TOKEN` | Push/pull datasets to/from HuggingFace Hub |
+| Variable                 | Purpose                                                                           |
+| ------------------------ | --------------------------------------------------------------------------------- |
+| `OPENROUTER_API_KEY`     | Data generation & refinement via OpenRouter                                       |
+| `HF_TOKEN`               | Push/pull datasets to/from HuggingFace Hub                                        |
 | `UNSLOTH_LLAMA_CPP_PATH` | Pre-built llama.cpp path for GGUF export, built by Unsloth automatically if unset |
 
 ## Usage
 
 ### Data Pipeline
+
 ```bash
 # Generate synthetic training data
 just generate-dataset
@@ -82,6 +88,7 @@ just pull-dataset
 Use `--config` on any command to use a custom configuration file.
 
 ### Training Pipeline
+
 ```bash
 # Run full training pipeline: CPT → SFT → export
 just train
@@ -93,6 +100,7 @@ just export
 ```
 
 ### Dry Run
+
 ```bash
 # CPT → SFT → export using existing test data
 just dry-run
@@ -102,6 +110,7 @@ just dry-run -r
 ```
 
 ### Utilities
+
 ```bash
 # Check tokenizer efficiency on Bengali text
 just check-tokenizer
@@ -126,6 +135,7 @@ All configuration is managed via `configs/config.yaml`. The config uses a nested
 ### Using Custom Configs
 
 Pass a custom config file with `--config`:
+
 ```bash
 just generate-dataset --config configs/custom.yaml
 just refine-dataset --config configs/custom.yaml
