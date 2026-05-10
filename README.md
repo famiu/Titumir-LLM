@@ -153,3 +153,6 @@ See `configs/config.yaml` for the default configuration.
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE)
+
+> [!NOTE]
+> Much of this project is written using AI coding tools (e.g. OpenCode). I use this project as a testing ground for evaluating the performance of AI tools and keeping up with their workflows. I supervise the overall structure of the project, but I don't care to control the minute details.
