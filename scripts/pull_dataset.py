@@ -12,16 +12,21 @@ from training.config import load_config
 def pull_dataset(config_path: str | None = None) -> None:
     """Pull dataset from HuggingFace Hub."""
     load_dotenv()
-    login()
     config = load_config(config_path)
-    dataset = load_dataset(config.paths.hf_dataset, split="train")
 
-    os.makedirs(config.paths.refined_data_dir, exist_ok=True)
-    with open(config.paths.local_dataset, "w", encoding="utf-8") as f:
+    if config.profile.hf_dataset is None:
+        print(f"No HF dataset configured for profile '{config.profile.name}' — skipping pull")
+        return
+
+    login()
+    dataset = load_dataset(config.profile.hf_dataset, split="train")
+
+    os.makedirs(config.profile.refined_data_dir, exist_ok=True)
+    with open(config.profile.local_dataset, "w", encoding="utf-8") as f:
         for example in dataset:
             f.write(json.dumps(example, ensure_ascii=False) + "\n")
 
-    print(f"Pulled {len(dataset)} examples to {config.paths.local_dataset}")
+    print(f"Pulled {len(dataset)} examples to {config.profile.local_dataset}")
 
 
 if __name__ == "__main__":

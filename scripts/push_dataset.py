@@ -11,17 +11,21 @@ from training.config import load_config
 def push_dataset(config_path: str | None = None) -> None:
     """Push dataset to HuggingFace Hub."""
     load_dotenv()
-    login()
     config = load_config(config_path)
-    dataset_path = config.paths.local_dataset
 
+    if config.profile.hf_dataset is None:
+        print(f"No HF dataset configured for profile '{config.profile.name}' — skipping push")
+        return
+
+    dataset_path = config.profile.local_dataset
     if not Path(dataset_path).exists():
         print(f"Dataset file not found: {dataset_path}")
         return
 
+    login()
     dataset = load_dataset("json", data_files=dataset_path, split="train")
-    dataset.push_to_hub(config.paths.hf_dataset)
-    print(f"Pushed {len(dataset)} examples to {config.paths.hf_dataset}")
+    dataset.push_to_hub(config.profile.hf_dataset)
+    print(f"Pushed {len(dataset)} examples to {config.profile.hf_dataset}")
 
 
 if __name__ == "__main__":

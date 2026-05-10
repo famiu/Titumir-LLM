@@ -81,7 +81,7 @@ def generate_dataset(
     if not gen_cfg.prompt or not gen_cfg.prompt.strip():
         raise ValueError("Generation prompt not configured. Set 'prompt' in the 'generation' section of your config.")
 
-    output_dir = config.paths.unprocessed_data_dir
+    output_dir = config.profile.unprocessed_data_dir
     os.makedirs(output_dir, exist_ok=True)
 
     if filename is not None:

@@ -158,9 +158,9 @@ def refine_dataset(
     """Refine all unprocessed JSONL files that don't already have a refined counterpart."""
     config = load_config(config_path)
     ref_cfg = config.refinement
-    input_dir = config.paths.unprocessed_data_dir
-    refined_dir = config.paths.refined_data_dir
-    removed_dir = config.paths.removed_data_dir
+    input_dir = config.profile.unprocessed_data_dir
+    refined_dir = config.profile.refined_data_dir
+    removed_dir = config.profile.removed_data_dir
 
     unprocessed_path = Path(input_dir)
     refined_path = Path(refined_dir)

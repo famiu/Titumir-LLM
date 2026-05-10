@@ -6,17 +6,35 @@ import os
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 
-class PathsConfig(BaseModel):
-    """Configuration for data paths."""
+class ProfileConfig(BaseModel):
+    """Configuration for a named data profile. All paths are auto-derived."""
 
-    unprocessed_data_dir: str = "data/unprocessed"
-    refined_data_dir: str = "data/refined"
-    removed_data_dir: str = "data/removed"
-    local_dataset: str = "data/refined/bangla_sft_merged.jsonl"
-    hf_dataset: str = "famiu/titumir-sft-dataset"
+    name: str
+    data_root: str = "data"
+    hf_dataset: str | None = None
+
+    @computed_field
+    @property
+    def unprocessed_data_dir(self) -> str:
+        return f"{self.data_root}/{self.name}/unprocessed"
+
+    @computed_field
+    @property
+    def refined_data_dir(self) -> str:
+        return f"{self.data_root}/{self.name}/refined"
+
+    @computed_field
+    @property
+    def removed_data_dir(self) -> str:
+        return f"{self.data_root}/{self.name}/removed"
+
+    @computed_field
+    @property
+    def local_dataset(self) -> str:
+        return f"{self.data_root}/{self.name}/{self.name}_merged.jsonl"
 
 
 class ModelConfig(BaseModel):
@@ -216,7 +234,7 @@ class TopicEntry(BaseModel):
 class Config(BaseModel):
     """Root configuration class."""
 
-    paths: PathsConfig = Field(default_factory=PathsConfig)
+    profile: ProfileConfig
     model: ModelConfig = Field(default_factory=ModelConfig)
     cpt_training: CPTTrainingConfig = Field(default_factory=CPTTrainingConfig)
     sft_training: SFTTrainingConfig = Field(default_factory=SFTTrainingConfig)
@@ -239,10 +257,7 @@ class Config(BaseModel):
             raise FileNotFoundError(f"Config file not found: {path}")
 
         with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-
-        if data is None:
-            data = {}
+            data = yaml.safe_load(f) or {}
 
         if "topics" in data and isinstance(data["topics"], list):
             data["topics"] = [
@@ -253,11 +268,10 @@ class Config(BaseModel):
 
 
 def load_config(path: str | Path | None = None) -> Config:
-    """Load configuration from a YAML file, or use default if path is None."""
+    """Load configuration from a YAML file. Defaults to configs/config.yaml."""
     if path is None:
-        default_path = Path("configs/config.yaml")
-        if default_path.exists():
-            return Config.from_yaml(default_path)
-        return Config()
-
-    return Config.from_yaml(Path(path))
+        path = Path("configs/config.yaml")
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Config file not found: {path}")
+    return Config.from_yaml(path)

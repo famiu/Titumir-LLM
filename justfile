@@ -10,6 +10,18 @@ train *args:
     just sft {{args}}
     just export {{args}}
 
+# Run dry-run pipeline. Pass --regenerate/-r to regenerate the test dataset first.
+[arg("regenerate", long="regenerate", short="r", value="true")]
+dry-run regenerate="false":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "{{regenerate}}" = "true" ]; then
+        just generate-dataset --config configs/dry_run.yaml dry_run.jsonl
+        just refine-dataset --config configs/dry_run.yaml dry_run.jsonl
+        just merge-dataset --config configs/dry_run.yaml
+    fi
+    just train --config configs/dry_run.yaml
+
 # Stage 1: Continued pretraining on raw Bengali text
 cpt *args:
     uv run training/cpt.py {{args}}

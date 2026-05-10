@@ -1,61 +1,45 @@
+# configs/dry_run.yaml
+# Minimal config for testing the pipeline end-to-end locally
+
 profile:
-  name: default
+  name: dry_run
   data_root: data
-  hf_dataset: "famiu/titumir-sft-dataset"
 
 model:
-  name: "Qwen/Qwen3.5-9B"
-  max_seq_length: 2048
+  name: "unsloth/Qwen2.5-0.5B-Instruct"
+  max_seq_length: 512
   load_in_4bit: True
 
 cpt_training:
   datasets:
-    - path: "BanglishRev/bangla-english-and-code-mixed-ecommerce-review-dataset"
-      split: "train"
-      column: "review"
-      probability: 0.40
-    - path: "sanzanalora/Ben-Sarc"
-      split: "train"
-      column: "Comments"
-      probability: 0.25
-    - path: "allenai/c4"
-      split: "train[:60000]"
-      config: "bn"
-      column: "text"
-      probability: 0.20
-    - path: "statmt/cc100"
-      split: "train[:20000]"
-      config: "bn_rom"
-      column: "text"
-      probability: 0.10
     - path: "wikimedia/wikipedia"
-      split: "train[:10000]"
+      split: "train[:50]"
       config: "20231101.bn"
       column: "text"
-      probability: 0.05
-  max_examples: 500000
-  output_dir: "./checkpoints/cpt"
-  checkpoint: "./checkpoints/cpt_final"
+      probability: 1.0
+  max_examples: 10
+  output_dir: "./checkpoints/dry_cpt"
+  checkpoint: "./checkpoints/dry_cpt_final"
   learning_rate: 5e-6
   epochs: 1
-  lora_r: 16
-  lora_alpha: 32
-  batch_size: 4
-  grad_accum: 4
+  lora_r: 8
+  lora_alpha: 16
+  batch_size: 1
+  grad_accum: 1
 
 sft_training:
-  output_dir: "./checkpoints/sft"
-  checkpoint: "./checkpoints/sft_final"
+  output_dir: "./checkpoints/dry_sft"
+  checkpoint: "./checkpoints/dry_sft_final"
   learning_rate: 2e-4
-  epochs: 3
-  batch_size: 4
-  grad_accum: 4
+  epochs: 1
+  batch_size: 1
+  grad_accum: 1
   eval_split: 0.1
 
 generation:
   endpoint: "https://openrouter.ai/api/v1/chat/completions"
   api_key_env: "OPENROUTER_API_KEY"
-  model: "CHANGE_ME"
+  model: "google/gemini-3.1-flash-lite-preview"
   temperature: 0.9
   max_tokens: 4000
   batch_size: 20
@@ -117,7 +101,7 @@ generation:
 refinement:
   endpoint: "https://openrouter.ai/api/v1/chat/completions"
   api_key_env: "OPENROUTER_API_KEY"
-  model: "CHANGE_ME"
+  model: "google/gemini-3.1-flash-lite-preview"
   temperature: 0.1
   max_tokens: 1000
   batch_size: 40
@@ -162,57 +146,10 @@ refinement:
     }}
 
 export:
-  path: "./export/titumir_9b"
+  path: "./export/dry_run"
   quantization_method: "q4_k_m"
 
 topics:
-  - ["daily commute and traffic frustrations in Dhaka", 40]
-  - ["street food and local restaurants in Bangladesh", 40]
-  - ["load shedding and power outage complaints", 60]
-  - ["Bangladesh national cricket team reactions", 80]
-  - ["Bangladeshi music and new song releases", 40]
-  - ["Bangladeshi drama and web series reactions", 40]
-  - ["university and college student life", 60]
-  - ["rising prices of essentials — rice, oil, vegetables", 80]
-  - ["smartphone and tech discussions among Bangladeshi youth", 40]
-  - ["funny and relatable everyday situations in Bangladesh", 60]
-  - ["weather complaints — heat, floods, monsoon", 60]
-  - ["online shopping experiences in Bangladesh", 40]
-  - ["job market and unemployment frustrations", 80]
-  - ["social media trends and viral content", 40]
-  - ["family pressure around marriage and career", 60]
-  - ["Dhaka vs other cities — lifestyle comparisons", 40]
-  - ["road accidents and traffic law violations", 60]
-  - ["hospital and healthcare experiences in Bangladesh", 60]
-  - ["internet speed and mobile data complaints", 40]
-  - ["Bangladeshi food culture and recipes", 40]
-  - ["reactions to Bollywood and Hollywood movies", 40]
-  - ["FIFA World Cup and football discussions", 60]
-  - ["Bangladesh Premier League cricket reactions", 60]
-  - ["student exam pressure and coaching culture", 60]
-  - ["generational differences between parents and youth", 60]
-  - ["pollution and environmental issues in Dhaka", 40]
-  - ["nostalgia about childhood in Bangladesh", 40]
-  - ["public transport experiences — bus, rickshaw, CNG", 40]
-  - ["reactions to local memes and humor pages", 40]
-  - ["side hustles and freelancing among Bangladeshi youth", 60]
-  - ["relationships and dating culture in Bangladesh", 60]
-  - ["Eid and festival preparations and celebrations", 40]
-  - ["reactions to local celebrity gossip and drama", 40]
-  - ["migrant worker experiences — remittance and sacrifice", 80]
-  - ["studying abroad dreams and visa frustrations", 60]
-  - ["gaming and esports among Bangladeshi youth", 40]
-  - ["mental health awareness and social stigma", 60]
-  - ["neighborhood and community life in Bangladesh", 40]
-  - ["reactions to natural disasters — floods, cyclones", 60]
-  - ["cost of living and middle class struggles", 80]
-  - ["discussions about women's rights and gender equality in Bangladesh", 80]
-  - ["discussions about religious diversity and coexistence in Bangladesh", 60]
-  - ["discussions about Bangladesh's 1971 liberation war", 80]
-  - ["discussions about labor rights and worker conditions in Bangladesh", 80]
-  - ["discussions about political protests and civil movements in Bangladesh", 60]
-  - ["discussions about minority communities and social inclusion", 60]
-  - ["discussions about corruption and governance in Bangladesh", 80]
-  - ["discussions about press freedom and media in Bangladesh", 60]
-  - ["discussions about India-Bangladesh relations", 60]
-  - ["discussions about climate change and environmental justice in Bangladesh", 60]
+  - ["daily commute and traffic frustrations in Dhaka", 35]
+  - ["street food and local restaurants in Bangladesh", 35]
+  - ["funny and relatable everyday situations in Bangladesh", 30]

@@ -10,7 +10,7 @@ from trl import SFTConfig, SFTTrainer
 from training.config import load_config
 
 
-def run_sft(config_path: str | None = None, use_local: bool = False) -> None:
+def run_sft(config_path: str | None = None) -> None:
     """Run supervised finetuning on conversational dataset."""
     config = load_config(config_path)
     model_cfg = config.model
@@ -29,24 +29,28 @@ def run_sft(config_path: str | None = None, use_local: bool = False) -> None:
         load_in_4bit=model_cfg.load_in_4bit,
     )
 
-    if use_local:
-        local_path = Path(config.paths.local_dataset)
-        if not local_path.exists():
-            raise FileNotFoundError(f"Local dataset not found: {local_path}")
+    local_path = Path(config.profile.local_dataset)
+    if local_path.exists():
         with open(local_path, encoding="utf-8") as f:
             data = [json.loads(line) for line in f if line.strip()]
         print(f"Loaded {len(data)} examples from {local_path}")
         dataset = Dataset.from_list(data)
-    else:
+    elif config.profile.hf_dataset is not None:
+        print(f"Local dataset not found at {local_path} — falling back to HuggingFace Hub")
         try:
-            dataset = load_dataset(config.paths.hf_dataset, split="train")
+            dataset = load_dataset(config.profile.hf_dataset, split="train")
         except Exception as e:
             raise RuntimeError(
-                f"Failed to load dataset '{config.paths.hf_dataset}' from HuggingFace Hub. "
-                "Check your internet connection and HF_TOKEN. "
-                "Use '--local' to load from a local file instead."
+                f"Failed to load dataset '{config.profile.hf_dataset}' from HuggingFace Hub. "
+                "Check your internet connection and HF_TOKEN."
             ) from e
-        print(f"Loaded {len(dataset)} examples from {config.paths.hf_dataset}")
+        print(f"Loaded {len(dataset)} examples from {config.profile.hf_dataset}")
+    else:
+        raise FileNotFoundError(
+            f"No local dataset found at {local_path} and no HF dataset "
+            f"configured for profile '{config.profile.name}'. "
+            "Run the data pipeline first or set 'profile.hf_dataset' in your config."
+        )
 
     def format_example(example: dict) -> dict:
         """Format a single example using the model's chat template."""
@@ -84,7 +88,7 @@ def run_sft(config_path: str | None = None, use_local: bool = False) -> None:
             save_steps=50,
             save_total_limit=2,
             output_dir=sft_cfg.output_dir,
-            warmup_ratio=0.05,
+            warmup_steps=0.05,
             lr_scheduler_type="cosine",
             report_to="none",
         ),
@@ -101,11 +105,5 @@ def run_sft(config_path: str | None = None, use_local: bool = False) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run supervised finetuning")
     parser.add_argument("-c", "--config", type=str, default=None, help="Path to config file")
-    parser.add_argument(
-        "-l",
-        "--local",
-        action="store_true",
-        help="Use local dataset instead of HuggingFace Hub",
-    )
     args = parser.parse_args()
-    run_sft(config_path=args.config, use_local=args.local)
+    run_sft(config_path=args.config)

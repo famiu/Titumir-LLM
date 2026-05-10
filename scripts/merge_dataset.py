@@ -9,8 +9,8 @@ from training.config import load_config
 def merge_datasets(config_path: str | None = None) -> None:
     """Merge all refined JSONL files into a single deduplicated dataset."""
     config = load_config(config_path)
-    input_dir = config.paths.refined_data_dir
-    output_file = config.paths.local_dataset
+    input_dir = config.profile.refined_data_dir
+    output_file = config.profile.local_dataset
 
     input_path = Path(input_dir)
     output_path = Path(output_file)

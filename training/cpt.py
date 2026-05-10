@@ -89,7 +89,7 @@ def run_cpt(config_path: str | None = None) -> None:
             save_steps=100,
             save_total_limit=2,
             output_dir=cpt_cfg.output_dir,
-            warmup_ratio=0.05,
+            warmup_steps=0.05,
             lr_scheduler_type="cosine",
             report_to="none",
         ),

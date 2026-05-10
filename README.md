@@ -77,9 +77,17 @@ just train
 
 # Or run stages individually
 just cpt
-just sft          # loads dataset from HuggingFace Hub
-just sft --local  # loads dataset from local file
+just sft
 just export
+```
+
+### Dry Run
+```bash
+# CPT → SFT → export using existing test data
+just dry-run
+
+# Regenerate dataset first, then run full pipeline
+just dry-run -r
 ```
 
 ### Utilities
@@ -95,7 +103,7 @@ just lint
 
 All configuration is managed via `configs/config.yaml`. The config uses a nested YAML structure organized into sections:
 
-- **paths** — Data directories and dataset paths
+- **profile** — Data profile information
 - **model** — Base model configuration
 - **cpt_training** — Continued pretraining settings (datasets, max examples, output/checkpoint dirs, LoRA params)
 - **sft_training** — Supervised finetuning settings (output/checkpoint dirs)
