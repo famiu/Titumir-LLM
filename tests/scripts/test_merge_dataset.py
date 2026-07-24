@@ -32,6 +32,9 @@ class TestMergeDatasets:
         with open(output_file, encoding="utf-8") as f:
             merged_lines = [line for line in f if line.strip()]
         assert len(merged_lines) == 19, f"Expected 19 unique, got {len(merged_lines)}"
+        manifest = json.loads((tmp_path / "merged.jsonl.manifest.json").read_text())
+        assert manifest["examples"] == 19
+        assert len(manifest["inputs"]) == 2
 
     def test_within_file_dedup(self, tmp_path: pytest.TempPathFactory, sample_with_dup_path: Path) -> None:
         refined_dir = tmp_path / "refined"

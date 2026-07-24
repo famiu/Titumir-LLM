@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 
-from scripts._data import atomic_text_writer, conversation_key, validate_conversation
+from scripts._data import atomic_text_writer, conversation_key, file_sha256, validate_conversation
 from training.config import load_config
 
 
@@ -65,6 +65,21 @@ def merge_datasets(config_path: str | None = None) -> None:
         f"Done — {total_examples} examples written to {output_file} "
         f"({exact_duplicates} exact, {normalized_duplicates} normalization-equivalent duplicates removed)"
     )
+    with atomic_text_writer(output_path.with_suffix(f"{output_path.suffix}.manifest.json")) as manifest:
+        json.dump(
+            {
+                "inputs": [
+                    {"path": str(path), "sha256": file_sha256(path), "bytes": path.stat().st_size} for path in files
+                ],
+                "output": str(output_path),
+                "examples": total_examples,
+                "exact_duplicates_removed": exact_duplicates,
+                "normalization_equivalent_duplicates_removed": normalized_duplicates,
+            },
+            manifest,
+            ensure_ascii=False,
+            indent=2,
+        )
 
 
 if __name__ == "__main__":

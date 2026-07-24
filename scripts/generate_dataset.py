@@ -199,13 +199,16 @@ def generate_dataset(
             except Exception as e:
                 print(f"  Topic {topic_idx} failed: {e}")
                 failed_topics.append(topic_idx)
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as interrupt:
         for future in futures:
             future.cancel()
         executor.shutdown(wait=False, cancel_futures=True)
-        save_state()
-        print(f"\nInterrupted — resume state saved to {state_path}")
-        raise
+        try:
+            save_state()
+            print(f"\nInterrupted — resume state saved to {state_path}")
+        except OSError as error:
+            print(f"\nInterrupted — failed to save resume state: {error}")
+        raise interrupt
     else:
         executor.shutdown(wait=True)
 

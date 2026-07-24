@@ -90,6 +90,8 @@ def check_tokenizer(config_path: str | None = None, dataset_path: str | None = N
                 example = validate_conversation(json.loads(line), f"{dataset_path}:{line_num}")
             except json.JSONDecodeError as error:
                 raise ValueError(f"Malformed JSON in {dataset_path} at line {line_num}: {error}") from error
+            except ValueError as error:
+                raise ValueError(f"Invalid conversation in {dataset_path} at line {line_num}: {error}") from error
             text = "\n".join(message["content"] for message in example["messages"])
             result = analyze_text(tokenizer, text, config.model.max_seq_length)
             by_category[str(result["category"])].append(result)

@@ -171,13 +171,16 @@ def refine_file(
                 f"  [{completed}/{total_batches}] batch {batch_idx} checkpointed — "
                 f"{len(kept)} kept, {len(removed)} removed"
             )
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as interrupt:
         for future in futures:
             future.cancel()
         executor.shutdown(wait=False, cancel_futures=True)
-        save_state()
-        print(f"\nInterrupted during {input_file.name}; resume state saved to {state_file}")
-        raise
+        try:
+            save_state()
+            print(f"\nInterrupted during {input_file.name}; resume state saved to {state_file}")
+        except OSError as error:
+            print(f"\nInterrupted during {input_file.name}; failed to save resume state: {error}")
+        raise interrupt
     else:
         executor.shutdown(wait=True)
 

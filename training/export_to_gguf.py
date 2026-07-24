@@ -31,23 +31,32 @@ def export_gguf(config_path: str | None = None, model=None, tokenizer=None) -> N
         tokenizer,
         quantization_method=export_cfg.quantization_method,
     )
-    output_dir = Path(f"{export_cfg.path}_gguf")
-    if output_dir.is_dir():
-        files = [
-            {"name": path.name, "sha256": file_sha256(path), "bytes": path.stat().st_size}
-            for path in sorted(output_dir.glob("*.gguf"))
-        ]
-        with atomic_text_writer(output_dir / "export_manifest.json") as file:
-            json.dump(
-                {
-                    "source_checkpoint": sft_cfg.checkpoint,
-                    "quantization_method": export_cfg.quantization_method,
-                    "files": files,
-                },
-                file,
-                indent=2,
-            )
-    print(f"Export complete — {export_cfg.path}_gguf/")
+    export_prefix = Path(export_cfg.path)
+    output_candidates = [export_prefix, Path(f"{export_cfg.path}_gguf")]
+    gguf_files = []
+    for candidate in output_candidates:
+        if candidate.is_dir():
+            gguf_files.extend(candidate.glob("*.gguf"))
+        elif candidate.is_file() and candidate.suffix == ".gguf":
+            gguf_files.append(candidate)
+    gguf_files.extend(export_prefix.parent.glob(f"{export_prefix.name}*.gguf"))
+    gguf_files = sorted(set(path.resolve() for path in gguf_files))
+    if not gguf_files:
+        raise FileNotFoundError(f"GGUF export completed but no output file was found for prefix {export_cfg.path}")
+
+    manifest_dir = gguf_files[0].parent
+    files = [{"name": path.name, "sha256": file_sha256(path), "bytes": path.stat().st_size} for path in gguf_files]
+    with atomic_text_writer(manifest_dir / "export_manifest.json") as file:
+        json.dump(
+            {
+                "source_checkpoint": sft_cfg.checkpoint,
+                "quantization_method": export_cfg.quantization_method,
+                "files": files,
+            },
+            file,
+            indent=2,
+        )
+    print(f"Export complete — {manifest_dir}/")
 
 
 if __name__ == "__main__":

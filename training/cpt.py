@@ -93,6 +93,8 @@ def run_cpt(config_path: str | None = None, model=None, tokenizer=None) -> tuple
         print(f"Requested {cpt_cfg.max_examples} CPT examples, but only {available} are available")
     raw_dataset = interleaved.shuffle(seed=config.seed).select(range(selected))
     eval_dataset = concatenate_datasets(eval_datasets).shuffle(seed=config.seed)
+    eval_limit = min(len(eval_dataset), max(1, round(cpt_cfg.max_examples * cpt_cfg.eval_split)))
+    eval_dataset = eval_dataset.select(range(eval_limit))
 
     print(f"Total CPT examples: {len(raw_dataset)}")
     realized = Counter(raw_dataset["source"])

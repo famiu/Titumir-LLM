@@ -15,6 +15,9 @@ class TestExportGguf:
         ):
             mock_model = MagicMock()
             mock_tokenizer = MagicMock()
+            export_dir = tmp_path / "export_gguf"
+            export_dir.mkdir()
+            (export_dir / "model.gguf").write_bytes(b"gguf")
             mock_load.return_value = (mock_model, mock_tokenizer)
 
             mock_cfg = mock_load_cfg.return_value
@@ -44,6 +47,9 @@ class TestExportGguf:
 
             mock_model = MagicMock()
             mock_tokenizer = MagicMock()
+            export_dir = tmp_path / "export_gguf"
+            export_dir.mkdir()
+            (export_dir / "model.gguf").write_bytes(b"gguf")
 
             with patch("training.export_to_gguf.FastLanguageModel.from_pretrained") as mock_load:
                 export_gguf(model=mock_model, tokenizer=mock_tokenizer)
@@ -53,3 +59,4 @@ class TestExportGguf:
             mock_model.save_pretrained_gguf.assert_called_once()
             call_args = mock_model.save_pretrained_gguf.call_args
             assert call_args[1]["quantization_method"] == "q4_k_m"
+            assert (export_dir / "export_manifest.json").exists()
