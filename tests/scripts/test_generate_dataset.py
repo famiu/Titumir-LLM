@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 import pytest
@@ -178,3 +179,62 @@ class TestGenerateDataset:
         output_file = out_dir / "test_output.jsonl"
         assert output_file.exists()
         assert output_file.name.endswith(".jsonl")
+
+    def test_refuses_to_overwrite_existing_output(self, tmp_path: pytest.TempPathFactory) -> None:
+        output_dir = tmp_path / "unprocessed"
+        output_dir.mkdir()
+        (output_dir / "existing.jsonl").write_text("existing\n")
+
+        with patch("scripts.generate_dataset.load_config") as mock_load:
+            mock_cfg = mock_load.return_value
+            mock_cfg.profile.name = "test"
+            mock_cfg.profile.unprocessed_data_dir = str(output_dir)
+            mock_cfg.generation.model = "test/model"
+            mock_cfg.generation.prompt = "Generate {n} about {topic}"
+            mock_cfg.topics = []
+
+            with pytest.raises(FileExistsError):
+                generate_dataset(filename="existing.jsonl")
+
+    def test_resume_uses_checkpointed_topics(self, tmp_path: pytest.TempPathFactory) -> None:
+        output_dir = tmp_path / "unprocessed"
+        output_dir.mkdir()
+        output_file = output_dir / "resume.jsonl"
+        state_file = output_dir / "resume.jsonl.state.json"
+        completed_example = {
+            "messages": [{"role": "user", "content": "p1"}, {"role": "assistant", "content": "r1"}],
+            "metadata": {"topic": "topic one"},
+        }
+
+        with patch("scripts.generate_dataset.load_config") as mock_load:
+            mock_cfg = mock_load.return_value
+            mock_cfg.profile.name = "test"
+            mock_cfg.profile.unprocessed_data_dir = str(output_dir)
+            mock_cfg.generation.model = "test/model"
+            mock_cfg.generation.prompt = "Generate {n} about {topic}"
+            mock_cfg.generation.batch_size = 1
+            mock_cfg.generation.get_max_workers.return_value = 1
+            mock_cfg.topics = [
+                type("Topic", (), {"topic": "topic one", "count": 1})(),
+                type("Topic", (), {"topic": "topic two", "count": 1})(),
+            ]
+            identity = {
+                "profile": "test",
+                "model": "test/model",
+                "prompt_sha256": __import__("hashlib").sha256(mock_cfg.generation.prompt.encode()).hexdigest(),
+                "topics": [{"topic": "topic one", "count": 1}, {"topic": "topic two", "count": 1}],
+            }
+            state_file.write_text(
+                json.dumps({"identity": identity, "completed": {"1": [completed_example]}}),
+                encoding="utf-8",
+            )
+            generated_example = {
+                "messages": [{"role": "user", "content": "p2"}, {"role": "assistant", "content": "r2"}]
+            }
+            with patch("scripts.generate_dataset.call_llm", return_value=[generated_example]) as mock_call:
+                generate_dataset(filename="resume.jsonl", resume=True)
+
+        assert mock_call.call_count == 1
+        lines = [json.loads(line) for line in output_file.read_text().splitlines()]
+        assert [line["messages"][0]["content"] for line in lines] == ["p1", "p2"]
+        assert not state_file.exists()
