@@ -42,6 +42,8 @@ cpt_training:
   lora_alpha: 32
   batch_size: 4
   grad_accum: 4
+  eval_split: 0.01
+  packing: True
 
 sft_training:
   output_dir: "./checkpoints/sft"

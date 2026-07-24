@@ -1,0 +1,53 @@
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+from datasets import Dataset
+
+from training.cpt import run_cpt
+
+
+def test_cpt_caps_examples_filters_text_and_evaluates() -> None:
+    source = Dataset.from_dict({"text": ["এক", "দুই", "তিন", "চার", "", "পাঁচ"]})
+    model = MagicMock()
+    tokenizer = MagicMock()
+    peft_model = MagicMock()
+    trainer = MagicMock()
+    trainer.evaluate.return_value = {"eval_loss": 1.0}
+
+    with (
+        patch("training.cpt.load_config") as load_config,
+        patch("training.cpt.load_dataset", return_value=source),
+        patch("training.cpt.FastLanguageModel.get_peft_model", return_value=peft_model),
+        patch("training.cpt.SFTTrainer", return_value=trainer) as trainer_class,
+    ):
+        config = load_config.return_value
+        config.model.max_seq_length = 128
+        config.cpt_training.datasets = [
+            type(
+                "Entry",
+                (),
+                {"path": "test/source", "split": "train", "config": None, "column": "text", "probability": 1.0},
+            )()
+        ]
+        config.cpt_training.max_examples = 100
+        config.cpt_training.eval_split = 0.2
+        config.cpt_training.packing = True
+        config.cpt_training.lora_r = 8
+        config.cpt_training.lora_alpha = 16
+        config.cpt_training.learning_rate = 1e-5
+        config.cpt_training.epochs = 1
+        config.cpt_training.batch_size = 1
+        config.cpt_training.grad_accum = 1
+        config.cpt_training.output_dir = "output"
+        config.cpt_training.checkpoint = "final"
+
+        run_cpt(model=model, tokenizer=tokenizer)
+
+    kwargs = trainer_class.call_args.kwargs
+    assert len(kwargs["train_dataset"]) == 4
+    assert len(kwargs["eval_dataset"]) == 1
+    assert kwargs["args"].packing is True
+    assert kwargs["args"].eval_strategy == "epoch"
+    trainer.train.assert_called_once()
+    trainer.evaluate.assert_called_once()

@@ -82,6 +82,8 @@ class CPTTrainingConfig(BaseModel):
     lora_alpha: int = 32
     batch_size: int = 4
     grad_accum: int = 4
+    eval_split: float = 0.01
+    packing: bool = True
 
     @field_validator("max_examples", "lora_r", "batch_size", "grad_accum", "epochs")
     @classmethod
@@ -95,6 +97,13 @@ class CPTTrainingConfig(BaseModel):
     def learning_rate_positive(cls, v: float) -> float:
         if v <= 0:
             raise ValueError("learning_rate must be positive")
+        return v
+
+    @field_validator("eval_split")
+    @classmethod
+    def eval_split_range(cls, v: float) -> float:
+        if v <= 0 or v >= 1:
+            raise ValueError("eval_split must be between 0 and 1")
         return v
 
     @model_validator(mode="after")

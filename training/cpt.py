@@ -1,7 +1,9 @@
 import argparse
+import math
+from collections import Counter
 
 from unsloth import FastLanguageModel  # isort: skip
-from datasets import interleave_datasets, load_dataset
+from datasets import concatenate_datasets, interleave_datasets, load_dataset
 from trl import SFTConfig, SFTTrainer
 
 from training.config import load_config
@@ -41,6 +43,7 @@ def run_cpt(config_path: str | None = None, model=None, tokenizer=None) -> tuple
 
     # ── Load and interleave datasets from config ─────────────────────────
     loaded_datasets = []
+    eval_datasets = []
     probabilities = []
 
     for entry in cpt_cfg.datasets:
@@ -55,32 +58,54 @@ def run_cpt(config_path: str | None = None, model=None, tokenizer=None) -> tuple
                 "Check your internet connection and that the dataset exists."
             ) from e
         print(f"Loaded {entry.path} [{entry.split}]: {len(ds)} examples, columns: {ds.column_names}")
+        if entry.column not in ds.column_names:
+            raise ValueError(
+                f"CPT dataset '{entry.path}' does not contain configured column '{entry.column}'. "
+                f"Available columns: {ds.column_names}"
+            )
         if entry.column != "text":
             ds = ds.rename_column(entry.column, "text")
         ds = ds.select_columns(["text"])
-        loaded_datasets.append(ds)
+        before_filter = len(ds)
+        ds = ds.filter(lambda example: isinstance(example["text"], str) and bool(example["text"].strip()))
+        print(f"  Kept {len(ds)}/{before_filter} non-empty examples")
+        if len(ds) < 2:
+            raise ValueError(f"CPT dataset '{entry.path}' needs at least two non-empty examples for evaluation")
+        split = ds.train_test_split(test_size=cpt_cfg.eval_split, seed=42)
+        source_name = entry.path if entry.config is None else f"{entry.path}/{entry.config}"
+        train_ds = split["train"].add_column("source", [source_name] * len(split["train"]))
+        eval_ds = split["test"].add_column("source", [source_name] * len(split["test"]))
+        loaded_datasets.append(train_ds)
+        eval_datasets.append(eval_ds)
         probabilities.append(entry.probability)
 
-    raw_dataset = (
-        interleave_datasets(
-            loaded_datasets,
-            probabilities=probabilities,
-            seed=42,
-            stopping_strategy="all_exhausted_without_replacement",
-        )
-        .shuffle(seed=42)
-        .select(range(cpt_cfg.max_examples))
+    interleaved = interleave_datasets(
+        loaded_datasets,
+        probabilities=probabilities,
+        seed=42,
+        stopping_strategy="all_exhausted_without_replacement",
     )
+    available = len(interleaved)
+    selected = min(cpt_cfg.max_examples, available)
+    if selected < cpt_cfg.max_examples:
+        print(f"Requested {cpt_cfg.max_examples} CPT examples, but only {available} are available")
+    raw_dataset = interleaved.shuffle(seed=42).select(range(selected))
+    eval_dataset = concatenate_datasets(eval_datasets).shuffle(seed=42)
 
     print(f"Total CPT examples: {len(raw_dataset)}")
+    realized = Counter(raw_dataset["source"])
+    for source, count in sorted(realized.items()):
+        print(f"  Realized source mix: {source}: {count} ({count / len(raw_dataset):.1%})")
 
     trainer = SFTTrainer(
         model=model,
         processing_class=tokenizer,
-        train_dataset=raw_dataset,
+        train_dataset=raw_dataset.remove_columns("source"),
+        eval_dataset=eval_dataset.remove_columns("source"),
         args=SFTConfig(
             dataset_text_field="text",
-            max_seq_length=model_cfg.max_seq_length,
+            max_length=model_cfg.max_seq_length,
+            packing=cpt_cfg.packing,
             learning_rate=cpt_cfg.learning_rate,
             num_train_epochs=cpt_cfg.epochs,
             per_device_train_batch_size=cpt_cfg.batch_size,
@@ -93,11 +118,17 @@ def run_cpt(config_path: str | None = None, model=None, tokenizer=None) -> tuple
             warmup_steps=0.05,
             lr_scheduler_type="cosine",
             report_to="none",
+            eval_strategy="epoch",
         ),
     )
 
     print("Starting CPT...")
     trainer.train()
+    eval_metrics = trainer.evaluate()
+    eval_loss = eval_metrics.get("eval_loss")
+    if eval_loss is not None:
+        perplexity = math.exp(eval_loss) if eval_loss < 100 else math.inf
+        print(f"CPT eval loss: {eval_loss:.4f}, perplexity: {perplexity:.4f}")
 
     model.save_pretrained(cpt_cfg.checkpoint)
     tokenizer.save_pretrained(cpt_cfg.checkpoint)
