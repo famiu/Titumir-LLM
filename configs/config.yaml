@@ -53,6 +53,7 @@ sft_training:
   batch_size: 4
   grad_accum: 4
   eval_split: 0.1
+  assistant_only_loss: True
 
 generation:
   endpoint: "https://openrouter.ai/api/v1/chat/completions"

@@ -128,6 +128,7 @@ class SFTTrainingConfig(BaseModel):
     batch_size: int = 4
     grad_accum: int = 4
     eval_split: float | None = None
+    assistant_only_loss: bool = True
 
     @field_validator("batch_size", "grad_accum", "epochs")
     @classmethod

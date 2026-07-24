@@ -1,13 +1,51 @@
 import argparse
+import hashlib
 import json
 import os
+from collections import defaultdict
 from pathlib import Path
 
 from unsloth import FastLanguageModel  # isort: skip
 from datasets import Dataset, load_dataset
 from trl import SFTConfig, SFTTrainer
 
+from scripts._data import conversation_key, validate_conversation
 from training.config import load_config
+
+
+def split_conversations(examples: list[dict], eval_split: float, seed: int = 42) -> tuple[list[dict], list[dict]]:
+    """Split normalized conversation groups while preserving topic proportions."""
+    grouped: dict[str, dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
+    for example in examples:
+        metadata = example.get("metadata")
+        topic = metadata.get("topic", "unknown") if isinstance(metadata, dict) else "unknown"
+        grouped[topic][conversation_key(example)].append(example)
+
+    train = []
+    evaluation = []
+    deferred_singletons = []
+    for topic, groups_by_key in sorted(grouped.items()):
+        groups = list(groups_by_key.values())
+        groups.sort(
+            key=lambda group: hashlib.sha256(f"{seed}:{topic}:{conversation_key(group[0])}".encode()).hexdigest()
+        )
+        if len(groups) == 1:
+            deferred_singletons.append(groups[0])
+            continue
+        eval_count = max(1, min(len(groups) - 1, round(len(groups) * eval_split)))
+        for group in groups[:eval_count]:
+            evaluation.extend(group)
+        for group in groups[eval_count:]:
+            train.extend(group)
+
+    for group in deferred_singletons:
+        train.extend(group)
+    if not evaluation and len(deferred_singletons) > 1:
+        evaluation.extend(deferred_singletons.pop())
+        train = [example for group in deferred_singletons for example in group]
+    if not train or not evaluation:
+        raise ValueError("SFT dataset is too small for the configured grouped evaluation split")
+    return train, evaluation
 
 
 def run_sft(config_path: str | None = None, model=None, tokenizer=None) -> tuple:
@@ -32,20 +70,35 @@ def run_sft(config_path: str | None = None, model=None, tokenizer=None) -> tuple
 
     local_path = Path(config.profile.local_dataset)
     if local_path.exists():
-        with open(local_path, encoding="utf-8") as f:
-            data = [json.loads(line) for line in f if line.strip()]
+        data = []
+        with open(local_path, encoding="utf-8") as file:
+            for line_num, line in enumerate(file, 1):
+                if not line.strip():
+                    continue
+                try:
+                    example = json.loads(line)
+                except json.JSONDecodeError as error:
+                    raise ValueError(f"Malformed JSON in {local_path} at line {line_num}: {error}") from error
+                data.append(validate_conversation(example, f"{local_path}:{line_num}"))
         print(f"Loaded {len(data)} examples from {local_path}")
-        dataset = Dataset.from_list(data)
     elif config.profile.hf_dataset is not None:
         print(f"Local dataset not found at {local_path} — falling back to HuggingFace Hub")
         try:
-            dataset = load_dataset(config.profile.hf_dataset, split="train")
+            hub_dataset = load_dataset(
+                config.profile.hf_dataset,
+                split="train",
+                token=os.environ.get("HF_TOKEN"),
+            )
         except Exception as e:
             raise RuntimeError(
                 f"Failed to load dataset '{config.profile.hf_dataset}' from HuggingFace Hub. "
                 "Check your internet connection and HF_TOKEN."
             ) from e
-        print(f"Loaded {len(dataset)} examples from {config.profile.hf_dataset}")
+        data = [
+            validate_conversation(example, f"{config.profile.hf_dataset} row {index}")
+            for index, example in enumerate(hub_dataset)
+        ]
+        print(f"Loaded {len(data)} examples from {config.profile.hf_dataset}")
     else:
         raise FileNotFoundError(
             f"No local dataset found at {local_path} and no HF dataset "
@@ -53,24 +106,35 @@ def run_sft(config_path: str | None = None, model=None, tokenizer=None) -> tuple
             "Run the data pipeline first or set 'profile.hf_dataset' in your config."
         )
 
-    def format_example(example: dict) -> dict:
-        """Format a single example using the model's chat template."""
-        return {
-            "text": tokenizer.apply_chat_template(
-                example["messages"],
-                tokenize=False,
-                add_generation_prompt=False,
-            )
-        }
-
-    dataset = dataset.map(format_example).shuffle(seed=42)
+    if not data:
+        raise ValueError("SFT dataset is empty")
+    if not getattr(tokenizer, "chat_template", None):
+        raise ValueError("The selected tokenizer does not define a chat template required for SFT")
 
     eval_dataset = None
     if sft_cfg.eval_split is not None and sft_cfg.eval_split > 0:
-        split_dataset = dataset.train_test_split(test_size=sft_cfg.eval_split, seed=42)
-        dataset = split_dataset["train"]
-        eval_dataset = split_dataset["test"]
-        print(f"Split dataset: {len(dataset)} train, {len(eval_dataset)} eval")
+        train_examples, eval_examples = split_conversations(data, sft_cfg.eval_split)
+        print(f"Split dataset: {len(train_examples)} train, {len(eval_examples)} eval")
+    else:
+        train_examples = data
+        eval_examples = []
+
+    def prepare_example(example: dict) -> dict:
+        metadata = example.get("metadata")
+        if sft_cfg.assistant_only_loss:
+            prepared = {
+                "prompt": [example["messages"][0]],
+                "completion": [example["messages"][1]],
+            }
+        else:
+            prepared = {"messages": example["messages"]}
+        if metadata is not None:
+            prepared["metadata"] = metadata
+        return prepared
+
+    dataset = Dataset.from_list([prepare_example(example) for example in train_examples]).shuffle(seed=42)
+    if eval_examples:
+        eval_dataset = Dataset.from_list([prepare_example(example) for example in eval_examples]).shuffle(seed=42)
 
     trainer = SFTTrainer(
         model=model,
@@ -78,8 +142,9 @@ def run_sft(config_path: str | None = None, model=None, tokenizer=None) -> tuple
         train_dataset=dataset,
         eval_dataset=eval_dataset,
         args=SFTConfig(
-            dataset_text_field="text",
-            max_seq_length=model_cfg.max_seq_length,
+            max_length=model_cfg.max_seq_length,
+            completion_only_loss=sft_cfg.assistant_only_loss,
+            packing=False,
             learning_rate=sft_cfg.learning_rate,
             num_train_epochs=sft_cfg.epochs,
             per_device_train_batch_size=sft_cfg.batch_size,
@@ -92,6 +157,7 @@ def run_sft(config_path: str | None = None, model=None, tokenizer=None) -> tuple
             warmup_steps=0.05,
             lr_scheduler_type="cosine",
             report_to="none",
+            eval_strategy="epoch" if eval_dataset is not None else "no",
         ),
     )
 

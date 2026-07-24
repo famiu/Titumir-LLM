@@ -27,6 +27,7 @@ cpt_training:
   batch_size: 1
   grad_accum: 1
   eval_split: 0.1
+  assistant_only_loss: True
   packing: True
 
 sft_training:
