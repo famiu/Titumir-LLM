@@ -1,12 +1,15 @@
 import argparse
+import hashlib
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from threading import Lock
 
+from scripts._data import atomic_text_writer, file_sha256, validate_conversation
 from scripts._llm import call_llm
 from training.config import RefinementConfig, load_config
+
+CHECKPOINT_INTERVAL = 10
 
 
 def check_batch_with_retry(
@@ -18,7 +21,10 @@ def check_batch_with_retry(
 ) -> tuple[int, list[dict], list[dict]]:
     """Check a single batch with retries. Returns (batch_idx, kept, removed_with_reasons)."""
     formatted = []
+    validated_batch = []
     for i, ex in enumerate(batch):
+        ex = validate_conversation(ex, f"batch {batch_idx} example {i}")
+        validated_batch.append(ex)
         post = ex["messages"][0]["content"]
         comment = ex["messages"][1]["content"]
         formatted.append(f"[{i}] Post: {post}\n    Comment: {comment}")
@@ -31,22 +37,32 @@ def check_batch_with_retry(
             {"role": "system", "content": refinement_prompt},
             {"role": "user", "content": prompt},
         ],
+        expected_type=dict,
     )
 
     if result is None:
-        print(f"  [batch {batch_idx}] LLM call failed — keeping entire batch")
-        return batch_idx, batch, []
+        raise RuntimeError(f"Batch {batch_idx} refinement failed after all API retries")
 
+    if not isinstance(result, dict):
+        raise ValueError(f"Batch {batch_idx} refinement response must be an object")
     try:
-        remove_indices = set(result.get("remove", []))
-        reasons = result.get("reasons", {})
-    except (AttributeError, TypeError):
-        print(f"  [batch {batch_idx}] Unexpected response format — keeping entire batch")
-        return batch_idx, batch, []
+        remove_indices = {int(index) for index in result.get("remove", [])}
+        keep_indices = {int(index) for index in result.get("keep", [])}
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"Batch {batch_idx} contains non-integer keep/remove indices") from error
+    reasons = result.get("reasons", {})
+    if not isinstance(reasons, dict):
+        raise ValueError(f"Batch {batch_idx} reasons must be an object")
+
+    valid_indices = set(range(len(validated_batch)))
+    if remove_indices & keep_indices:
+        raise ValueError(f"Batch {batch_idx} keep/remove indices overlap")
+    if remove_indices | keep_indices != valid_indices:
+        raise ValueError(f"Batch {batch_idx} keep/remove indices must partition the complete batch")
 
     kept = []
     removed = []
-    for i, example in enumerate(batch):
+    for i, example in enumerate(validated_batch):
         if i in remove_indices:
             removed.append(
                 {
@@ -68,10 +84,12 @@ def refine_file(
     llm_cfg: RefinementConfig,
     refinement_prompt: str,
     batch_size: int,
+    resume: bool = False,
 ) -> None:
     """Refine a single JSONL file."""
     kept_file = os.path.join(refined_dir, input_file.name)
     removed_file = os.path.join(removed_dir, input_file.name)
+    state_file = Path(f"{kept_file}.state.json")
 
     all_examples = []
     with open(input_file, encoding="utf-8") as f:
@@ -79,9 +97,10 @@ def refine_file(
             if not line.strip():
                 continue
             try:
-                all_examples.append(json.loads(line))
+                example = json.loads(line)
             except json.JSONDecodeError as e:
-                print(f"  Warning: Skipping malformed JSON at line {line_num}: {e}")
+                raise ValueError(f"Malformed JSON in {input_file} at line {line_num}: {e}") from e
+            all_examples.append(validate_conversation(example, f"{input_file}:{line_num}"))
 
     total = len(all_examples)
     if total == 0:
@@ -95,11 +114,33 @@ def refine_file(
     total_batches = len(batches)
     print(f"\nRefining {input_file.name} — {total} examples, {total_batches} batches")
 
-    results: dict[int, tuple[list[dict], list[dict]]] = {}
-    results_lock = Lock()
-    completed = 0
+    identity = {
+        "input_sha256": file_sha256(input_file),
+        "prompt_sha256": hashlib.sha256(refinement_prompt.encode()).hexdigest(),
+        "model": llm_cfg.model,
+        "batch_size": batch_size,
+    }
+    state = {"identity": identity, "completed": {}}
+    if state_file.exists():
+        if not resume:
+            raise FileExistsError(f"Refinement state already exists: {state_file}. Resume with --resume.")
+        with open(state_file, encoding="utf-8") as file:
+            state = json.load(file)
+        if state.get("identity") != identity:
+            raise ValueError(f"Refinement state is incompatible with the current input/config: {state_file}")
+    elif resume:
+        raise FileNotFoundError(f"Refinement state not found: {state_file}")
 
-    with ThreadPoolExecutor(max_workers=llm_cfg.get_max_workers()) as executor:
+    serialized_results: dict[str, dict[str, list[dict]]] = state["completed"]
+
+    def save_state() -> None:
+        with atomic_text_writer(state_file) as file:
+            json.dump({"identity": identity, "completed": serialized_results}, file, ensure_ascii=False)
+
+    completed = len(serialized_results)
+    executor = ThreadPoolExecutor(max_workers=llm_cfg.get_max_workers())
+    futures = {}
+    try:
         futures = {
             executor.submit(
                 check_batch_with_retry,
@@ -110,32 +151,50 @@ def refine_file(
                 refinement_prompt,
             ): idx
             for idx, batch, start in batches
+            if str(idx) not in serialized_results
         }
 
-        try:
-            for future in as_completed(futures):
+        for future in as_completed(futures):
+            batch_idx = futures[future]
+            try:
                 batch_idx, kept, removed = future.result()
-                with results_lock:
-                    results[batch_idx] = (kept, removed)
-                    completed += 1
-                    print(
-                        f"  [{completed}/{total_batches}] batch {batch_idx} done — "
-                        f"{len(kept)} kept, {len(removed)} removed"
-                    )
-
-        except KeyboardInterrupt:
-            print(f"\nInterrupted during {input_file.name}")
-            raise
+            except Exception as error:
+                save_state()
+                for pending in futures:
+                    pending.cancel()
+                executor.shutdown(wait=False, cancel_futures=True)
+                raise RuntimeError(
+                    f"Refinement stopped at batch {batch_idx}; completed work is saved in {state_file}"
+                ) from error
+            serialized_results[str(batch_idx)] = {"kept": kept, "removed": removed}
+            completed += 1
+            if completed % CHECKPOINT_INTERVAL == 0 or completed == total_batches:
+                save_state()
+            print(
+                f"  [{completed}/{total_batches}] batch {batch_idx} checkpointed — "
+                f"{len(kept)} kept, {len(removed)} removed"
+            )
+    except KeyboardInterrupt as interrupt:
+        for future in futures:
+            future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
+        try:
+            save_state()
+            print(f"\nInterrupted during {input_file.name}; resume state saved to {state_file}")
+        except OSError as error:
+            print(f"\nInterrupted during {input_file.name}; failed to save resume state: {error}")
+        raise interrupt
+    else:
+        executor.shutdown(wait=True)
 
     total_kept = 0
     total_removed = 0
 
-    with (
-        open(kept_file, "w", encoding="utf-8") as kf,
-        open(removed_file, "w", encoding="utf-8") as rf,
-    ):
-        for batch_idx in sorted(results.keys()):
-            kept, removed = results[batch_idx]
+    with atomic_text_writer(kept_file) as kf, atomic_text_writer(removed_file) as rf:
+        for batch_idx in range(total_batches):
+            result = serialized_results[str(batch_idx)]
+            kept = result["kept"]
+            removed = result["removed"]
             for example in kept:
                 kf.write(json.dumps(example, ensure_ascii=False) + "\n")
                 total_kept += 1
@@ -145,6 +204,20 @@ def refine_file(
                 print(f"         Post:    {entry['example']['messages'][0]['content'][:80]}")
                 print(f"         Comment: {entry['example']['messages'][1]['content'][:80]}")
                 total_removed += 1
+    with atomic_text_writer(f"{kept_file}.manifest.json") as file:
+        json.dump(
+            {
+                **identity,
+                "input_examples": total,
+                "kept_examples": total_kept,
+                "removed_examples": total_removed,
+                "retention_rate": total_kept / total,
+            },
+            file,
+            ensure_ascii=False,
+            indent=2,
+        )
+    state_file.unlink(missing_ok=True)
 
     retention = f"{100 * total_kept // total}%" if total > 0 else "0%"
     print(f"  {input_file.name} done — {total_kept} kept, {total_removed} removed ({retention} retained)")
@@ -153,6 +226,7 @@ def refine_file(
 def refine_dataset(
     config_path: str | None = None,
     input_file: str | None = None,
+    resume: bool = False,
 ) -> None:
     """Refine all unprocessed JSONL files that don't already have a refined counterpart."""
     config = load_config(config_path)
@@ -186,6 +260,7 @@ def refine_dataset(
             ref_cfg,
             ref_cfg.prompt,
             ref_cfg.batch_size,
+            resume=resume,
         )
         return
 
@@ -212,6 +287,7 @@ def refine_dataset(
 
     try:
         for file in pending:
+            state_file = refined_path / f"{file.name}.state.json"
             refine_file(
                 file,
                 refined_dir,
@@ -219,6 +295,7 @@ def refine_dataset(
                 ref_cfg,
                 ref_cfg.prompt,
                 ref_cfg.batch_size,
+                resume=resume and state_file.exists(),
             )
     except KeyboardInterrupt:
         print("\nInterrupted")
@@ -231,5 +308,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Refine generated dataset")
     parser.add_argument("-c", "--config", type=str, default=None, help="Path to config file")
     parser.add_argument("filename", nargs="?", type=str, default=None, help="Specific file to refine")
+    parser.add_argument("--resume", action="store_true", help="Resume interrupted refinement checkpoints")
     args = parser.parse_args()
-    refine_dataset(config_path=args.config, input_file=args.filename)
+    refine_dataset(config_path=args.config, input_file=args.filename, resume=args.resume)

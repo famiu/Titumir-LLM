@@ -1,9 +1,9 @@
 import argparse
+import os
 from pathlib import Path
 
 from datasets import load_dataset
 from dotenv import load_dotenv
-from huggingface_hub import login
 
 from training.config import load_config
 
@@ -22,9 +22,11 @@ def push_dataset(config_path: str | None = None) -> None:
         print(f"Dataset file not found: {dataset_path}")
         return
 
-    login()
+    token = os.environ.get("HF_TOKEN")
+    if not token:
+        raise ValueError("HF_TOKEN is required to push a dataset")
     dataset = load_dataset("json", data_files=dataset_path, split="train")
-    dataset.push_to_hub(config.profile.hf_dataset)
+    dataset.push_to_hub(config.profile.hf_dataset, token=token)
     print(f"Pushed {len(dataset)} examples to {config.profile.hf_dataset}")
 
 

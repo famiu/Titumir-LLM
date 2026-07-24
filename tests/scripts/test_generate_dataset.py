@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from unittest.mock import patch
+import json
+from contextlib import contextmanager
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from scripts._data import atomic_text_writer
 from scripts.generate_dataset import generate_dataset, generate_topic, is_valid_example
 
 
@@ -18,6 +21,17 @@ class TestIsValidExample:
             ({"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": ""}]}, False),
             ({"messages": [{"role": "user", "content": "   "}, {"role": "assistant", "content": "hi"}]}, False),
             ({"messages": [{"role": None, "content": "hi"}, {"role": "assistant", "content": "hi"}]}, False),
+            ({"messages": [{"role": "assistant", "content": "hi"}, {"role": "user", "content": "bye"}]}, False),
+            (
+                {
+                    "messages": [
+                        {"role": "user", "content": "hi"},
+                        {"role": "assistant", "content": "bye"},
+                        {"role": "assistant", "content": "extra"},
+                    ]
+                },
+                False,
+            ),
             ({"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "bye"}]}, True),
         ],
     )
@@ -29,15 +43,16 @@ class TestGenerateTopic:
     def test_collects_examples_and_stops_on_none(self) -> None:
         from itertools import count
 
-        from training.config import ApiConfigBase
+        from training.config import GenerationConfig
 
-        cfg = ApiConfigBase(
+        cfg = GenerationConfig(
             endpoint="http://x",
             api_key_env="X",
             model="test",
             temperature=0.5,
             max_tokens=100,
             batch_size=10,
+            max_stalled_batches=2,
         )
 
         valid_batch = [
@@ -57,7 +72,7 @@ class TestGenerateTopic:
 
         call_count = 0
 
-        def fake_call_llm(llm_cfg, messages):
+        def fake_call_llm(llm_cfg, messages, expected_type=None):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -79,6 +94,28 @@ class TestGenerateTopic:
         assert len(result) == 2
         for ex in result:
             assert is_valid_example(ex)
+            assert ex["metadata"]["topic"] == "test topic"
+
+    def test_stops_after_repeated_empty_batches(self) -> None:
+        from itertools import count
+
+        from training.config import GenerationConfig
+
+        cfg = GenerationConfig(model="test", max_stalled_batches=2)
+        with (
+            patch("scripts.generate_dataset.call_llm", return_value=[]),
+            pytest.raises(RuntimeError, match="stalled batches"),
+        ):
+            generate_topic(
+                topic_idx=1,
+                topic="test topic",
+                examples_for_topic=2,
+                batch_size=2,
+                total_topics=1,
+                llm_cfg=cfg,
+                generation_prompt_template="Generate {n} examples about {topic}",
+                global_batch_counter=count(1),
+            )
 
 
 class TestGenerateDataset:
@@ -116,12 +153,11 @@ class TestGenerateDataset:
 
     def test_output_dir_created(self, tmp_path: pytest.TempPathFactory) -> None:
         out_dir = tmp_path / "unprocessed"
-        out_dir.mkdir()
 
         valid_batch = [{"messages": [{"role": "user", "content": "p"}, {"role": "assistant", "content": "r"}]}]
         call_count = 0
 
-        def fake_call_llm(llm_cfg, messages):
+        def fake_call_llm(llm_cfg, messages, expected_type=None):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -130,6 +166,7 @@ class TestGenerateDataset:
 
         with patch("scripts.generate_dataset.load_config") as mock_load:
             mock_cfg = mock_load.return_value
+            mock_cfg.profile.name = "test"
             mock_cfg.profile.unprocessed_data_dir = str(out_dir)
             mock_cfg.generation.model = "test/model"
             mock_cfg.generation.prompt = "Generate {n} about {topic}"
@@ -144,3 +181,116 @@ class TestGenerateDataset:
         output_file = out_dir / "test_output.jsonl"
         assert output_file.exists()
         assert output_file.name.endswith(".jsonl")
+
+    def test_refuses_to_overwrite_existing_output(self, tmp_path: pytest.TempPathFactory) -> None:
+        output_dir = tmp_path / "unprocessed"
+        output_dir.mkdir()
+        (output_dir / "existing.jsonl").write_text("existing\n")
+
+        with patch("scripts.generate_dataset.load_config") as mock_load:
+            mock_cfg = mock_load.return_value
+            mock_cfg.profile.name = "test"
+            mock_cfg.profile.unprocessed_data_dir = str(output_dir)
+            mock_cfg.generation.model = "test/model"
+            mock_cfg.generation.prompt = "Generate {n} about {topic}"
+            mock_cfg.topics = []
+
+            with pytest.raises(FileExistsError):
+                generate_dataset(filename="existing.jsonl")
+
+    def test_resume_uses_checkpointed_topics(self, tmp_path: pytest.TempPathFactory) -> None:
+        output_dir = tmp_path / "unprocessed"
+        output_dir.mkdir()
+        output_file = output_dir / "resume.jsonl"
+        state_file = output_dir / "resume.jsonl.state.json"
+        completed_example = {
+            "messages": [{"role": "user", "content": "p1"}, {"role": "assistant", "content": "r1"}],
+            "metadata": {"topic": "topic one"},
+        }
+
+        with patch("scripts.generate_dataset.load_config") as mock_load:
+            mock_cfg = mock_load.return_value
+            mock_cfg.profile.name = "test"
+            mock_cfg.profile.unprocessed_data_dir = str(output_dir)
+            mock_cfg.generation.model = "test/model"
+            mock_cfg.generation.prompt = "Generate {n} about {topic}"
+            mock_cfg.generation.batch_size = 1
+            mock_cfg.generation.get_max_workers.return_value = 1
+            mock_cfg.topics = [
+                type("Topic", (), {"topic": "topic one", "count": 1})(),
+                type("Topic", (), {"topic": "topic two", "count": 1})(),
+            ]
+            identity = {
+                "profile": "test",
+                "model": "test/model",
+                "prompt_sha256": __import__("hashlib").sha256(mock_cfg.generation.prompt.encode()).hexdigest(),
+                "topics": [{"topic": "topic one", "count": 1}, {"topic": "topic two", "count": 1}],
+            }
+            state_file.write_text(
+                json.dumps({"identity": identity, "completed": {"1": [completed_example]}}),
+                encoding="utf-8",
+            )
+            generated_example = {
+                "messages": [{"role": "user", "content": "p2"}, {"role": "assistant", "content": "r2"}]
+            }
+            with patch("scripts.generate_dataset.call_llm", return_value=[generated_example]) as mock_call:
+                generate_dataset(filename="resume.jsonl", resume=True)
+
+        assert mock_call.call_count == 1
+        lines = [json.loads(line) for line in output_file.read_text().splitlines()]
+        assert [line["messages"][0]["content"] for line in lines] == ["p1", "p2"]
+        assert not state_file.exists()
+
+    def test_interrupt_during_submission_saves_empty_state(self, tmp_path: pytest.TempPathFactory) -> None:
+        output_dir = tmp_path / "unprocessed"
+        executor = MagicMock()
+        executor.submit.side_effect = KeyboardInterrupt
+
+        with (
+            patch("scripts.generate_dataset.load_config") as load_config,
+            patch("scripts.generate_dataset.ThreadPoolExecutor", return_value=executor),
+        ):
+            config = load_config.return_value
+            config.profile.name = "test"
+            config.profile.unprocessed_data_dir = str(output_dir)
+            config.generation.model = "test/model"
+            config.generation.prompt = "Generate {n} about {topic}"
+            config.generation.batch_size = 1
+            config.generation.get_max_workers.return_value = 1
+            config.topics = [type("Topic", (), {"topic": "topic", "count": 1})()]
+            with pytest.raises(KeyboardInterrupt):
+                generate_dataset(filename="interrupted.jsonl")
+
+        executor.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
+        state = json.loads((output_dir / "interrupted.jsonl.state.json").read_text())
+        assert state["completed"] == {}
+
+    def test_manifest_failure_preserves_resume_state(self, tmp_path: pytest.TempPathFactory) -> None:
+        output_dir = tmp_path / "unprocessed"
+        valid_example = {"messages": [{"role": "user", "content": "post"}, {"role": "assistant", "content": "reply"}]}
+
+        @contextmanager
+        def fail_manifest(path):
+            if str(path).endswith(".manifest.json"):
+                raise OSError("manifest write failed")
+            with atomic_text_writer(path) as file:
+                yield file
+
+        with (
+            patch("scripts.generate_dataset.load_config") as load_config,
+            patch("scripts.generate_dataset.generate_topic", return_value=[valid_example]),
+            patch("scripts.generate_dataset.atomic_text_writer", side_effect=fail_manifest),
+        ):
+            config = load_config.return_value
+            config.profile.name = "test"
+            config.profile.unprocessed_data_dir = str(output_dir)
+            config.generation.model = "test/model"
+            config.generation.prompt = "Generate {n} about {topic}"
+            config.generation.batch_size = 1
+            config.generation.get_max_workers.return_value = 1
+            config.topics = [type("Topic", (), {"topic": "topic", "count": 1})()]
+            with pytest.raises(OSError, match="manifest write failed"):
+                generate_dataset(filename="failed-manifest.jsonl")
+
+        assert (output_dir / "failed-manifest.jsonl").exists()
+        assert (output_dir / "failed-manifest.jsonl.state.json").exists()

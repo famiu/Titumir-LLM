@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -60,6 +61,8 @@ class CPTDatasetEntry(BaseModel):
     config: str | None = None
     column: str = "text"
     probability: float
+    revision: str | None = None
+    retrieved_at: date | None = None
 
     @field_validator("probability")
     @classmethod
@@ -82,6 +85,9 @@ class CPTTrainingConfig(BaseModel):
     lora_alpha: int = 32
     batch_size: int = 4
     grad_accum: int = 4
+    eval_split: float = 0.01
+    packing: bool = True
+    resume_from_checkpoint: bool | str = False
 
     @field_validator("max_examples", "lora_r", "batch_size", "grad_accum", "epochs")
     @classmethod
@@ -95,6 +101,13 @@ class CPTTrainingConfig(BaseModel):
     def learning_rate_positive(cls, v: float) -> float:
         if v <= 0:
             raise ValueError("learning_rate must be positive")
+        return v
+
+    @field_validator("eval_split")
+    @classmethod
+    def eval_split_range(cls, v: float) -> float:
+        if v <= 0 or v >= 1:
+            raise ValueError("eval_split must be between 0 and 1")
         return v
 
     @model_validator(mode="after")
@@ -119,6 +132,8 @@ class SFTTrainingConfig(BaseModel):
     batch_size: int = 4
     grad_accum: int = 4
     eval_split: float | None = None
+    assistant_only_loss: bool = True
+    resume_from_checkpoint: bool | str = False
 
     @field_validator("batch_size", "grad_accum", "epochs")
     @classmethod
@@ -154,6 +169,7 @@ class ApiConfigBase(BaseModel):
     batch_timeout: int = 120
     max_retries: int = 5
     max_workers: int | None = None
+    reasoning_effort: str | None = None
     prompt: str = ""
 
     @field_validator("temperature")
@@ -197,6 +213,14 @@ class GenerationConfig(ApiConfigBase):
     temperature: float = 0.9
     max_tokens: int = 4000
     batch_size: int = 20
+    max_stalled_batches: int = 3
+
+    @field_validator("max_stalled_batches")
+    @classmethod
+    def max_stalled_batches_positive(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("max_stalled_batches must be positive")
+        return v
 
 
 class RefinementConfig(ApiConfigBase):
@@ -217,6 +241,20 @@ class ExportConfig(BaseModel):
     quantization_method: str = "q4_k_m"
 
 
+class EvaluationConfig(BaseModel):
+    """Configuration for lightweight generation comparisons."""
+
+    max_new_tokens: int = 128
+    prompts: list[str] = Field(default_factory=list)
+
+    @field_validator("max_new_tokens")
+    @classmethod
+    def max_new_tokens_positive(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("max_new_tokens must be positive")
+        return v
+
+
 class TopicEntry(BaseModel):
     """A topic entry for dataset generation."""
 
@@ -235,13 +273,22 @@ class Config(BaseModel):
     """Root configuration class."""
 
     profile: ProfileConfig
+    seed: int = 42
     model: ModelConfig = Field(default_factory=ModelConfig)
-    cpt_training: CPTTrainingConfig = Field(default_factory=CPTTrainingConfig)
+    cpt_training: CPTTrainingConfig
     sft_training: SFTTrainingConfig = Field(default_factory=SFTTrainingConfig)
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     refinement: RefinementConfig = Field(default_factory=RefinementConfig)
     export: ExportConfig = Field(default_factory=ExportConfig)
+    evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     topics: list[TopicEntry] = Field(default_factory=list)
+
+    @field_validator("seed")
+    @classmethod
+    def seed_non_negative(cls, v: int) -> int:
+        if v < 0 or v > 4_294_967_295:
+            raise ValueError("seed must be between 0 and 4294967295")
+        return v
 
     @model_validator(mode="after")
     def topics_required_if_generation(self) -> Config:
@@ -270,7 +317,7 @@ class Config(BaseModel):
 def load_config(path: str | Path | None = None) -> Config:
     """Load configuration from a YAML file. Defaults to configs/config.yaml."""
     if path is None:
-        path = Path("configs/config.yaml")
+        path = Path(__file__).resolve().parent.parent / "configs" / "config.yaml"
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")

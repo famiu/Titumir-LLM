@@ -60,6 +60,14 @@ pull-dataset *args:
 check-tokenizer *args:
     uv run scripts/check_tokenizer.py {{args}}
 
+# Audit dataset quality, diversity, and overlap
+audit-dataset *args:
+    uv run scripts/audit_dataset.py {{args}}
+
+# Evaluate open-weight models for data generation
+evaluate-models *args:
+    uv run scripts/evaluate_models.py {{args}}
+
 # Lint and format all Python files
 lint:
     uv run ruff check .

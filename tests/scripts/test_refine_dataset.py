@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from scripts._data import atomic_text_writer
 from scripts.refine_dataset import check_batch_with_retry, refine_dataset, refine_file
 from training.config import RefinementConfig
 
@@ -14,6 +16,7 @@ PRIME_INDICES = [2, 3, 5, 7]
 
 def prime_reasons_response(remove_indices: list[int]) -> dict:
     return {
+        "keep": [i for i in range(10) if i not in remove_indices],
         "remove": remove_indices,
         "reasons": {str(i): f"reason for index {i}" for i in remove_indices},
     }
@@ -24,9 +27,7 @@ class TestCheckBatchWithRetry:
         "mock_response,expected_kept,expected_removed_count",
         [
             (prime_reasons_response(PRIME_INDICES), 6, 4),
-            ({"remove": [], "reasons": {}}, 10, 0),
-            (None, 10, 0),
-            ("not a dict", 10, 0),
+            ({"keep": list(range(10)), "remove": [], "reasons": {}}, 10, 0),
         ],
     )
     def test_check_batch_with_retry_cases(
@@ -53,6 +54,23 @@ class TestCheckBatchWithRetry:
         assert len(kept) == expected_kept
         assert len(removed) == expected_removed_count
 
+    @pytest.mark.parametrize("mock_response", [None, "not a dict", {"keep": [0], "remove": []}])
+    def test_invalid_decision_raises(self, mock_response: object, sample_a_path: Path) -> None:
+        examples = [json.loads(line) for line in open(sample_a_path)]
+        cfg = RefinementConfig(
+            endpoint="http://x",
+            api_key_env="X",
+            model="test",
+            temperature=0.1,
+            max_tokens=100,
+            batch_size=10,
+        )
+        with (
+            patch("scripts.refine_dataset.call_llm", return_value=mock_response),
+            pytest.raises((RuntimeError, ValueError)),
+        ):
+            check_batch_with_retry(0, examples, 0, cfg, "")
+
     def test_missing_reason_fallback(self, sample_a_path: Path) -> None:
         examples = [json.loads(line) for line in open(sample_a_path)]
         cfg = RefinementConfig(
@@ -63,7 +81,7 @@ class TestCheckBatchWithRetry:
             max_tokens=100,
             batch_size=10,
         )
-        mock_response = {"remove": [2], "reasons": {}}
+        mock_response = {"keep": [i for i in range(10) if i != 2], "remove": [2], "reasons": {}}
 
         with patch("scripts.refine_dataset.call_llm", return_value=mock_response):
             batch_idx, kept, removed = check_batch_with_retry(0, examples, 0, cfg, "")
@@ -106,7 +124,7 @@ class TestRefineFile:
         assert len(kept_lines) == 6
         assert len(removed_lines) == 4
 
-    def test_malformed_lines_skipped(self, tmp_path: pytest.TempPathFactory, capsys: pytest.CaptureFixture) -> None:
+    def test_malformed_lines_abort_without_output(self, tmp_path: pytest.TempPathFactory) -> None:
         refined_dir = tmp_path / "refined"
         removed_dir = tmp_path / "removed"
         refined_dir.mkdir()
@@ -128,20 +146,159 @@ class TestRefineFile:
             batch_size=10,
         )
 
-        mock_response = {"remove": [], "reasons": {}}
-
-        with patch("scripts.refine_dataset.call_llm", return_value=mock_response):
+        with pytest.raises(ValueError, match="line 5"):
             refine_file(input_file, str(refined_dir), str(removed_dir), cfg, "", batch_size=10)
+        assert not (refined_dir / "malformed.jsonl").exists()
 
-        kept_file = refined_dir / "malformed.jsonl"
-        kept_lines = [l for l in open(kept_file) if l.strip()]
-        assert len(kept_lines) == 4
+    def test_failed_batch_can_resume(self, tmp_path: pytest.TempPathFactory, sample_a_path: Path) -> None:
+        refined_dir = tmp_path / "refined"
+        removed_dir = tmp_path / "removed"
+        refined_dir.mkdir()
+        removed_dir.mkdir()
+        input_file = tmp_path / "input.jsonl"
+        examples = [json.loads(line) for line in open(sample_a_path)][:4]
+        input_file.write_text("".join(json.dumps(example) + "\n" for example in examples))
+        cfg = RefinementConfig(
+            endpoint="http://x",
+            api_key_env="X",
+            model="test",
+            temperature=0.1,
+            max_tokens=100,
+            batch_size=2,
+            max_workers=1,
+        )
+        decision = {"keep": [0, 1], "remove": [], "reasons": {}}
 
-        captured = capsys.readouterr()
-        assert "malformed JSON" in captured.out
+        with (
+            patch("scripts.refine_dataset.call_llm", side_effect=[decision, None]),
+            pytest.raises(RuntimeError, match="completed work is saved"),
+        ):
+            refine_file(input_file, str(refined_dir), str(removed_dir), cfg, "prompt", batch_size=2)
+
+        state_file = refined_dir / "input.jsonl.state.json"
+        assert state_file.exists()
+        assert not (refined_dir / "input.jsonl").exists()
+
+        with patch("scripts.refine_dataset.call_llm", return_value=decision) as mock_call:
+            refine_file(input_file, str(refined_dir), str(removed_dir), cfg, "prompt", batch_size=2, resume=True)
+
+        assert mock_call.call_count == 1
+        assert len((refined_dir / "input.jsonl").read_text().splitlines()) == 4
+        assert not state_file.exists()
+
+    def test_checkpoints_at_bounded_interval(self, tmp_path: pytest.TempPathFactory, sample_a_path: Path) -> None:
+        refined_dir = tmp_path / "refined"
+        removed_dir = tmp_path / "removed"
+        refined_dir.mkdir()
+        removed_dir.mkdir()
+        input_file = tmp_path / "input.jsonl"
+        examples = [json.loads(line) for line in open(sample_a_path)][:6]
+        input_file.write_text("".join(json.dumps(example) + "\n" for example in examples))
+        cfg = RefinementConfig(
+            endpoint="http://x",
+            api_key_env="X",
+            model="test",
+            temperature=0.1,
+            max_tokens=100,
+            batch_size=1,
+            max_workers=1,
+        )
+        writes = []
+
+        @contextmanager
+        def recording_writer(path):
+            writes.append(Path(path))
+            with atomic_text_writer(path) as file:
+                yield file
+
+        with (
+            patch("scripts.refine_dataset.CHECKPOINT_INTERVAL", 2),
+            patch("scripts.refine_dataset.atomic_text_writer", side_effect=recording_writer),
+            patch(
+                "scripts.refine_dataset.call_llm",
+                return_value={"keep": [0], "remove": [], "reasons": {}},
+            ),
+        ):
+            refine_file(input_file, str(refined_dir), str(removed_dir), cfg, "prompt", batch_size=1)
+
+        state_path = refined_dir / "input.jsonl.state.json"
+        assert sum(path == state_path for path in writes) == 3
+
+    def test_manifest_failure_preserves_resume_state(self, tmp_path: pytest.TempPathFactory) -> None:
+        refined_dir = tmp_path / "refined"
+        removed_dir = tmp_path / "removed"
+        refined_dir.mkdir()
+        removed_dir.mkdir()
+        input_file = tmp_path / "input.jsonl"
+        input_file.write_text(
+            json.dumps(
+                {
+                    "messages": [
+                        {"role": "user", "content": "post"},
+                        {"role": "assistant", "content": "reply"},
+                    ]
+                }
+            )
+            + "\n"
+        )
+        cfg = RefinementConfig(model="test", batch_size=1, max_workers=1)
+
+        @contextmanager
+        def fail_manifest(path):
+            if str(path).endswith(".manifest.json"):
+                raise OSError("manifest write failed")
+            with atomic_text_writer(path) as file:
+                yield file
+
+        with (
+            patch("scripts.refine_dataset.atomic_text_writer", side_effect=fail_manifest),
+            patch(
+                "scripts.refine_dataset.call_llm",
+                return_value={"keep": [0], "remove": [], "reasons": {}},
+            ),
+            pytest.raises(OSError, match="manifest write failed"),
+        ):
+            refine_file(input_file, str(refined_dir), str(removed_dir), cfg, "prompt", batch_size=1)
+
+        assert (refined_dir / "input.jsonl").exists()
+        assert (refined_dir / "input.jsonl.state.json").exists()
 
 
 class TestRefineDataset:
+    def test_directory_resume_only_for_checkpointed_files(self, tmp_path: pytest.TempPathFactory) -> None:
+        unprocessed = tmp_path / "unprocessed"
+        refined = tmp_path / "refined"
+        removed = tmp_path / "removed"
+        unprocessed.mkdir()
+        refined.mkdir()
+        removed.mkdir()
+        for name in ("checkpointed.jsonl", "fresh.jsonl"):
+            (unprocessed / name).write_text("{}\n")
+        (refined / "checkpointed.jsonl.state.json").write_text("{}")
+        cfg = RefinementConfig(
+            endpoint="http://x",
+            api_key_env="X",
+            model="test",
+            temperature=0.1,
+            max_tokens=100,
+            batch_size=1,
+            prompt="check",
+        )
+
+        with (
+            patch("scripts.refine_dataset.load_config") as load_config,
+            patch("scripts.refine_dataset.refine_file") as refine_file_mock,
+        ):
+            config = load_config.return_value
+            config.profile.unprocessed_data_dir = str(unprocessed)
+            config.profile.refined_data_dir = str(refined)
+            config.profile.removed_data_dir = str(removed)
+            config.refinement = cfg
+            refine_dataset(resume=True)
+
+        resume_by_name = {call.args[0].name: call.kwargs["resume"] for call in refine_file_mock.call_args_list}
+        assert resume_by_name == {"checkpointed.jsonl": True, "fresh.jsonl": False}
+
     def test_already_refined_file_skipped(
         self, tmp_path: pytest.TempPathFactory, capsys: pytest.CaptureFixture
     ) -> None:

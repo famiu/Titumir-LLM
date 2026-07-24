@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 
+from scripts._data import atomic_text_writer, conversation_key, file_sha256, validate_conversation
 from training.config import load_config
 
 
@@ -24,35 +25,61 @@ def merge_datasets(config_path: str | None = None) -> None:
     for f in files:
         print(f"  {f.name}")
 
-    seen = set()
-    examples = []
-
-    for path in files:
-        before = len(examples)
-        line_num = 0
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line_num += 1
-                if not line.strip():
-                    continue
-                try:
-                    ex = json.loads(line)
-                except json.JSONDecodeError as e:
-                    print(f"  Warning: Skipping malformed JSON in {path.name} at line {line_num}: {e}")
-                    continue
-                content = json.dumps(ex, sort_keys=True)
-                if content not in seen:
-                    seen.add(content)
-                    examples.append(ex)
-        added = len(examples) - before
-        print(f"  {path.name} — {added} unique examples added")
+    seen_exact = set()
+    seen_normalized = set()
+    total_examples = 0
+    exact_duplicates = 0
+    normalized_duplicates = 0
 
     os.makedirs(output_path.parent, exist_ok=True)
-    with open(output_file, "w", encoding="utf-8") as f:
-        for ex in examples:
-            f.write(json.dumps(ex, ensure_ascii=False) + "\n")
+    with atomic_text_writer(output_path) as output:
+        for path in files:
+            added = 0
+            with open(path, encoding="utf-8") as file:
+                for line_num, line in enumerate(file, 1):
+                    if not line.strip():
+                        continue
+                    try:
+                        example = json.loads(line)
+                    except json.JSONDecodeError as error:
+                        raise ValueError(f"Malformed JSON in {path} at line {line_num}: {error}") from error
+                    example = validate_conversation(example, f"{path}:{line_num}")
+                    exact_key = json.dumps(
+                        example["messages"], ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                    )
+                    normalized_key = conversation_key(example)
+                    if exact_key in seen_exact:
+                        exact_duplicates += 1
+                        continue
+                    if normalized_key in seen_normalized:
+                        normalized_duplicates += 1
+                        continue
+                    seen_exact.add(exact_key)
+                    seen_normalized.add(normalized_key)
+                    output.write(json.dumps(example, ensure_ascii=False) + "\n")
+                    added += 1
+                    total_examples += 1
+            print(f"  {path.name} — {added} unique examples added")
 
-    print(f"Done — {len(examples)} examples written to {output_file}")
+    print(
+        f"Done — {total_examples} examples written to {output_file} "
+        f"({exact_duplicates} exact, {normalized_duplicates} normalization-equivalent duplicates removed)"
+    )
+    with atomic_text_writer(output_path.with_suffix(f"{output_path.suffix}.manifest.json")) as manifest:
+        json.dump(
+            {
+                "inputs": [
+                    {"path": str(path), "sha256": file_sha256(path), "bytes": path.stat().st_size} for path in files
+                ],
+                "output": str(output_path),
+                "examples": total_examples,
+                "exact_duplicates_removed": exact_duplicates,
+                "normalization_equivalent_duplicates_removed": normalized_duplicates,
+            },
+            manifest,
+            ensure_ascii=False,
+            indent=2,
+        )
 
 
 if __name__ == "__main__":
