@@ -53,7 +53,7 @@ class TestMergeDatasets:
             merged_lines = [line for line in f if line.strip()]
         assert len(merged_lines) == 4, f"Expected 4 unique, got {len(merged_lines)}"
 
-    def test_malformed_lines_skipped(self, tmp_path: pytest.TempPathFactory, capsys: pytest.CaptureFixture) -> None:
+    def test_malformed_lines_abort_without_replacing_output(self, tmp_path: pytest.TempPathFactory) -> None:
         refined_dir = tmp_path / "refined"
         refined_dir.mkdir()
 
@@ -71,20 +71,35 @@ class TestMergeDatasets:
             f.write(json.dumps(valid_lines[2], ensure_ascii=False) + "\n")
 
         output_file = refined_dir.parent / "merged.jsonl"
+        output_file.write_text("previous\n")
 
         with patch("scripts.merge_dataset.load_config") as mock_load:
             mock_cfg = mock_load.return_value
             mock_cfg.profile.refined_data_dir = str(refined_dir)
             mock_cfg.profile.local_dataset = str(output_file)
 
+            with pytest.raises(ValueError, match="line 3"):
+                merge_datasets()
+
+        assert output_file.read_text() == "previous\n"
+
+    def test_normalization_equivalent_bangla_is_deduplicated(self, tmp_path: pytest.TempPathFactory) -> None:
+        refined_dir = tmp_path / "refined"
+        refined_dir.mkdir()
+        examples = [
+            {"messages": [{"role": "user", "content": "ড়"}, {"role": "assistant", "content": "উত্তর"}]},
+            {"messages": [{"role": "user", "content": "ড়"}, {"role": "assistant", "content": "উত্তর"}]},
+        ]
+        input_file = refined_dir / "unicode.jsonl"
+        input_file.write_text("".join(json.dumps(example, ensure_ascii=False) + "\n" for example in examples))
+        output_file = tmp_path / "merged.jsonl"
+
+        with patch("scripts.merge_dataset.load_config") as mock_load:
+            mock_load.return_value.profile.refined_data_dir = str(refined_dir)
+            mock_load.return_value.profile.local_dataset = str(output_file)
             merge_datasets()
 
-        with open(output_file, encoding="utf-8") as f:
-            merged_lines = [line for line in f if line.strip()]
-        assert len(merged_lines) == 3
-
-        captured = capsys.readouterr()
-        assert "malformed" in captured.out.lower()
+        assert len(output_file.read_text().splitlines()) == 1
 
     def test_empty_dir_shows_nothing_to_do(
         self, tmp_path: pytest.TempPathFactory, capsys: pytest.CaptureFixture
