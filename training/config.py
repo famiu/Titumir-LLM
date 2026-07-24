@@ -198,6 +198,14 @@ class GenerationConfig(ApiConfigBase):
     temperature: float = 0.9
     max_tokens: int = 4000
     batch_size: int = 20
+    max_stalled_batches: int = 3
+
+    @field_validator("max_stalled_batches")
+    @classmethod
+    def max_stalled_batches_positive(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("max_stalled_batches must be positive")
+        return v
 
 
 class RefinementConfig(ApiConfigBase):

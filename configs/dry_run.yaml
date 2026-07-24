@@ -43,6 +43,7 @@ generation:
   temperature: 0.9
   max_tokens: 4000
   batch_size: 20
+  max_stalled_batches: 3
   batch_timeout: 120
   max_retries: 5
   max_workers: ~

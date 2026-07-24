@@ -33,6 +33,9 @@ def generate_topic(
     """Generate all examples for a single topic sequentially."""
     print(f"\n[{topic_idx}/{total_topics}] Topic: {topic} ({examples_for_topic} examples)")
     topic_examples = []
+    stalled_batches = 0
+    total_returned = 0
+    total_invalid = 0
 
     while len(topic_examples) < examples_for_topic:
         batch_num = next(global_batch_counter)
@@ -43,23 +46,54 @@ def generate_topic(
         batch = call_llm(llm_cfg, [{"role": "user", "content": generation_prompt}], expected_type=list)
 
         if batch is None:
-            print(f"  Batch #{batch_num} [topic {topic_idx}] failed — skipping")
-            break
+            stalled_batches += 1
+            print(
+                f"  Batch #{batch_num} [topic {topic_idx}] failed "
+                f"({stalled_batches}/{llm_cfg.max_stalled_batches} stalled batches)"
+            )
+            if stalled_batches >= llm_cfg.max_stalled_batches:
+                raise RuntimeError(
+                    f"Topic {topic_idx} produced {len(topic_examples)}/{examples_for_topic} examples "
+                    f"after {stalled_batches} stalled batches"
+                )
+            continue
 
         valid = []
+        total_returned += len(batch)
         for example in batch:
             try:
-                valid.append(validate_conversation(example))
+                validated = validate_conversation(example)
+                valid.append(
+                    {
+                        "messages": validated["messages"],
+                        "metadata": {"topic": topic},
+                    }
+                )
             except ValueError:
                 continue
         invalid = len(batch) - len(valid)
+        total_invalid += invalid
 
         if invalid:
             print(f"  [topic {topic_idx}] Dropped {invalid} malformed examples from batch")
 
+        if not valid:
+            stalled_batches += 1
+            if stalled_batches >= llm_cfg.max_stalled_batches:
+                raise RuntimeError(
+                    f"Topic {topic_idx} produced {len(topic_examples)}/{examples_for_topic} examples "
+                    f"after {stalled_batches} stalled batches"
+                )
+            continue
+
+        stalled_batches = 0
         topic_examples.extend(valid)
         print(f"  [topic {topic_idx}] {len(topic_examples)}/{examples_for_topic} collected")
 
+    print(
+        f"  [topic {topic_idx}] requested={examples_for_topic}, returned={total_returned}, "
+        f"invalid={total_invalid}, accepted={examples_for_topic}"
+    )
     return topic_examples[:examples_for_topic]
 
 
@@ -91,6 +125,7 @@ def generate_dataset(
 
     total_topics = len(config.topics)
     total_written = 0
+    failed_topics = []
     write_lock = Lock()
 
     max_workers = gen_cfg.get_max_workers()
@@ -129,10 +164,15 @@ def generate_dataset(
                         print(f"  Topic {topic_idx} written — {len(examples)} examples ({total_written} total so far)")
                     except Exception as e:
                         print(f"  Topic {topic_idx} failed: {e}")
+                        failed_topics.append(topic_idx)
 
         except KeyboardInterrupt:
             print(f"\nInterrupted — {total_written} examples saved to {output_file}")
             return
+
+    if failed_topics:
+        failed = ", ".join(str(topic_idx) for topic_idx in sorted(failed_topics))
+        raise RuntimeError(f"Generation incomplete; failed topic(s): {failed}. Partial output: {output_file}")
 
     print(f"\nDone — {total_written} examples written to {output_file}")
 

@@ -40,15 +40,16 @@ class TestGenerateTopic:
     def test_collects_examples_and_stops_on_none(self) -> None:
         from itertools import count
 
-        from training.config import ApiConfigBase
+        from training.config import GenerationConfig
 
-        cfg = ApiConfigBase(
+        cfg = GenerationConfig(
             endpoint="http://x",
             api_key_env="X",
             model="test",
             temperature=0.5,
             max_tokens=100,
             batch_size=10,
+            max_stalled_batches=2,
         )
 
         valid_batch = [
@@ -90,6 +91,28 @@ class TestGenerateTopic:
         assert len(result) == 2
         for ex in result:
             assert is_valid_example(ex)
+            assert ex["metadata"]["topic"] == "test topic"
+
+    def test_stops_after_repeated_empty_batches(self) -> None:
+        from itertools import count
+
+        from training.config import GenerationConfig
+
+        cfg = GenerationConfig(model="test", max_stalled_batches=2)
+        with (
+            patch("scripts.generate_dataset.call_llm", return_value=[]),
+            pytest.raises(RuntimeError, match="stalled batches"),
+        ):
+            generate_topic(
+                topic_idx=1,
+                topic="test topic",
+                examples_for_topic=2,
+                batch_size=2,
+                total_topics=1,
+                llm_cfg=cfg,
+                generation_prompt_template="Generate {n} examples about {topic}",
+                global_batch_counter=count(1),
+            )
 
 
 class TestGenerateDataset:
