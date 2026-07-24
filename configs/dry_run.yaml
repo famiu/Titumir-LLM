@@ -159,6 +159,12 @@ export:
   path: "./export/dry_run"
   quantization_method: "q4_k_m"
 
+evaluation:
+  max_new_tokens: 32
+  prompts:
+    - "আজকে কেমন আছো?"
+    - "bhai traffic er obostha ki?"
+
 topics:
   - ["daily commute and traffic frustrations in Dhaka", 35]
   - ["street food and local restaurants in Bangladesh", 35]

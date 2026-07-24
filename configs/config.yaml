@@ -175,6 +175,14 @@ export:
   path: "./export/titumir_9b"
   quantization_method: "q4_k_m"
 
+evaluation:
+  max_new_tokens: 128
+  prompts:
+    - "ঢাকার যানজট নিয়ে তোমার অভিজ্ঞতা কী?"
+    - "bhai ajke eto gorom keno, ki kora jay?"
+    - "বাংলা আর English mix করে একটা স্বাভাবিক উত্তর দাও।"
+    - "একজন বন্ধুর চাকরি না পাওয়ার হতাশার জবাব দাও।"
+
 topics:
   - ["daily commute and traffic frustrations in Dhaka", 40]
   - ["street food and local restaurants in Bangladesh", 40]

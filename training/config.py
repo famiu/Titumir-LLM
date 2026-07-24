@@ -238,6 +238,20 @@ class ExportConfig(BaseModel):
     quantization_method: str = "q4_k_m"
 
 
+class EvaluationConfig(BaseModel):
+    """Configuration for lightweight generation comparisons."""
+
+    max_new_tokens: int = 128
+    prompts: list[str] = Field(default_factory=list)
+
+    @field_validator("max_new_tokens")
+    @classmethod
+    def max_new_tokens_positive(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("max_new_tokens must be positive")
+        return v
+
+
 class TopicEntry(BaseModel):
     """A topic entry for dataset generation."""
 
@@ -263,6 +277,7 @@ class Config(BaseModel):
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     refinement: RefinementConfig = Field(default_factory=RefinementConfig)
     export: ExportConfig = Field(default_factory=ExportConfig)
+    evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     topics: list[TopicEntry] = Field(default_factory=list)
 
     @field_validator("seed")
