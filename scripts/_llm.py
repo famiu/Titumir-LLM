@@ -61,9 +61,11 @@ def call_llm(
 
         except requests.HTTPError as e:
             if e.response.status_code == 429:
-                time.sleep(retry_delay(attempt + 1))
+                if attempt < llm_cfg.max_retries - 1:
+                    time.sleep(retry_delay(attempt + 1))
             elif e.response.status_code >= 500:
-                time.sleep(retry_delay(attempt))
+                if attempt < llm_cfg.max_retries - 1:
+                    time.sleep(retry_delay(attempt))
             else:
                 detail = e.response.text[:500].strip()
                 print(f"LLM request failed with HTTP {e.response.status_code}: {detail}")
@@ -78,7 +80,8 @@ def call_llm(
         ) as e:
             if attempt == llm_cfg.max_retries - 1:
                 print(f"LLM response failed validation after {llm_cfg.max_retries} attempts: {e}")
-            time.sleep(retry_delay(attempt))
+            else:
+                time.sleep(retry_delay(attempt))
         except requests.RequestException as e:
             print(f"LLM request failed: {e}")
             return None

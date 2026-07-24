@@ -222,7 +222,6 @@ def generate_dataset(
         for topic_idx in range(1, total_topics + 1):
             for example in completed[str(topic_idx)]:
                 file.write(json.dumps(example, ensure_ascii=False) + "\n")
-    state_path.unlink(missing_ok=True)
     with atomic_text_writer(output_path.with_suffix(f"{output_path.suffix}.manifest.json")) as file:
         json.dump(
             {
@@ -234,6 +233,7 @@ def generate_dataset(
             ensure_ascii=False,
             indent=2,
         )
+    state_path.unlink(missing_ok=True)
 
     print(f"\nDone — {total_written} examples written to {output_file}")
 

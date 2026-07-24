@@ -24,7 +24,11 @@
 - Source licenses and attribution:
 - Input and output hashes:
 - CPT realized source mixture:
-- SFT generator/refiner models and terms:
+- Synthetic-data run identifiers and generation/refinement manifest paths:
+- Generator/refiner providers, model revisions or release/access dates, and terms:
+- Generation/refinement prompt hashes:
+- Generated/refined manifest hashes:
+- Failed topic/batch IDs, errors, retry counts, recovery-state paths, and resolution:
 - Schema errors and removed records:
 - Exact and normalized duplicates:
 - Topic and script distribution:
@@ -54,5 +58,6 @@
 
 ## Claims
 
-List each intended public claim and the evidence supporting it. Do not infer naturalness, safety,
-representativeness, or downstream utility from training loss alone.
+List each intended public claim and the evidence supporting it. For synthetic-data claims, cite the
+corresponding run identifiers and generation/refinement manifest hashes. Do not infer naturalness,
+safety, representativeness, or downstream utility from training loss alone.

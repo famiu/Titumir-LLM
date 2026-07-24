@@ -86,17 +86,21 @@ def evaluate_models(config_path: str | None = None, output: str | None = None, g
             results["models"][label] = {"path": model_path, "status": "missing"}
             continue
         try:
-            responses = generate_responses(
-                model_path,
-                config.evaluation.prompts,
-                config.evaluation.max_new_tokens,
-                config.model.max_seq_length,
-            )
-        finally:
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        results["models"][label] = {"path": model_path, "status": "evaluated", "responses": responses}
+            try:
+                responses = generate_responses(
+                    model_path,
+                    config.evaluation.prompts,
+                    config.evaluation.max_new_tokens,
+                    config.model.max_seq_length,
+                )
+            finally:
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+        except Exception as error:
+            results["models"][label] = {"path": model_path, "status": "failed", "error": str(error)}
+        else:
+            results["models"][label] = {"path": model_path, "status": "evaluated", "responses": responses}
 
     if gguf is not None:
         try:

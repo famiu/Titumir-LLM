@@ -67,9 +67,9 @@ def run_cpt(config_path: str | None = None, model=None, tokenizer=None) -> tuple
                 f"CPT dataset '{entry.path}' does not contain configured column '{entry.column}'. "
                 f"Available columns: {ds.column_names}"
             )
+        ds = ds.select_columns([entry.column])
         if entry.column != "text":
             ds = ds.rename_column(entry.column, "text")
-        ds = ds.select_columns(["text"])
         before_filter = len(ds)
         ds = ds.filter(lambda example: isinstance(example["text"], str) and bool(example["text"].strip()))
         print(f"  Kept {len(ds)}/{before_filter} non-empty examples")

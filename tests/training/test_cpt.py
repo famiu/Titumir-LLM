@@ -9,7 +9,12 @@ from training.cpt import run_cpt
 
 
 def test_cpt_caps_examples_filters_text_and_evaluates() -> None:
-    source = Dataset.from_dict({"text": ["এক", "দুই", "তিন", "চার", "", "পাঁচ"]})
+    source = Dataset.from_dict(
+        {
+            "content": ["এক", "দুই", "তিন", "চার", "", "পাঁচ"],
+            "text": ["unconfigured"] * 6,
+        }
+    )
     model = MagicMock()
     tokenizer = MagicMock()
     peft_model = MagicMock()
@@ -30,7 +35,7 @@ def test_cpt_caps_examples_filters_text_and_evaluates() -> None:
             CPTDatasetEntry(
                 path="test/source",
                 split="train",
-                column="text",
+                column="content",
                 probability=1.0,
                 revision="abc123",
                 retrieved_at="2026-07-24",
@@ -54,6 +59,8 @@ def test_cpt_caps_examples_filters_text_and_evaluates() -> None:
     kwargs = trainer_class.call_args.kwargs
     assert len(kwargs["train_dataset"]) == 4
     assert len(kwargs["eval_dataset"]) == 1
+    assert "unconfigured" not in kwargs["train_dataset"]["text"]
+    assert "unconfigured" not in kwargs["eval_dataset"]["text"]
     assert kwargs["args"].packing is True
     assert kwargs["args"].eval_strategy == "epoch"
     trainer.train.assert_called_once_with(resume_from_checkpoint=None)

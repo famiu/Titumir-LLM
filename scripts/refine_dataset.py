@@ -204,7 +204,6 @@ def refine_file(
                 print(f"         Post:    {entry['example']['messages'][0]['content'][:80]}")
                 print(f"         Comment: {entry['example']['messages'][1]['content'][:80]}")
                 total_removed += 1
-    state_file.unlink(missing_ok=True)
     with atomic_text_writer(f"{kept_file}.manifest.json") as file:
         json.dump(
             {
@@ -218,6 +217,7 @@ def refine_file(
             ensure_ascii=False,
             indent=2,
         )
+    state_file.unlink(missing_ok=True)
 
     retention = f"{100 * total_kept // total}%" if total > 0 else "0%"
     print(f"  {input_file.name} done — {total_kept} kept, {total_removed} removed ({retention} retained)")

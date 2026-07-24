@@ -224,6 +224,45 @@ class TestRefineFile:
         state_path = refined_dir / "input.jsonl.state.json"
         assert sum(path == state_path for path in writes) == 3
 
+    def test_manifest_failure_preserves_resume_state(self, tmp_path: pytest.TempPathFactory) -> None:
+        refined_dir = tmp_path / "refined"
+        removed_dir = tmp_path / "removed"
+        refined_dir.mkdir()
+        removed_dir.mkdir()
+        input_file = tmp_path / "input.jsonl"
+        input_file.write_text(
+            json.dumps(
+                {
+                    "messages": [
+                        {"role": "user", "content": "post"},
+                        {"role": "assistant", "content": "reply"},
+                    ]
+                }
+            )
+            + "\n"
+        )
+        cfg = RefinementConfig(model="test", batch_size=1, max_workers=1)
+
+        @contextmanager
+        def fail_manifest(path):
+            if str(path).endswith(".manifest.json"):
+                raise OSError("manifest write failed")
+            with atomic_text_writer(path) as file:
+                yield file
+
+        with (
+            patch("scripts.refine_dataset.atomic_text_writer", side_effect=fail_manifest),
+            patch(
+                "scripts.refine_dataset.call_llm",
+                return_value={"keep": [0], "remove": [], "reasons": {}},
+            ),
+            pytest.raises(OSError, match="manifest write failed"),
+        ):
+            refine_file(input_file, str(refined_dir), str(removed_dir), cfg, "prompt", batch_size=1)
+
+        assert (refined_dir / "input.jsonl").exists()
+        assert (refined_dir / "input.jsonl.state.json").exists()
+
 
 class TestRefineDataset:
     def test_directory_resume_only_for_checkpointed_files(self, tmp_path: pytest.TempPathFactory) -> None:

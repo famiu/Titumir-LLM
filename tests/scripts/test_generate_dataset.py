@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from scripts._data import atomic_text_writer
 from scripts.generate_dataset import generate_dataset, generate_topic, is_valid_example
 
 
@@ -262,3 +264,33 @@ class TestGenerateDataset:
         executor.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
         state = json.loads((output_dir / "interrupted.jsonl.state.json").read_text())
         assert state["completed"] == {}
+
+    def test_manifest_failure_preserves_resume_state(self, tmp_path: pytest.TempPathFactory) -> None:
+        output_dir = tmp_path / "unprocessed"
+        valid_example = {"messages": [{"role": "user", "content": "post"}, {"role": "assistant", "content": "reply"}]}
+
+        @contextmanager
+        def fail_manifest(path):
+            if str(path).endswith(".manifest.json"):
+                raise OSError("manifest write failed")
+            with atomic_text_writer(path) as file:
+                yield file
+
+        with (
+            patch("scripts.generate_dataset.load_config") as load_config,
+            patch("scripts.generate_dataset.generate_topic", return_value=[valid_example]),
+            patch("scripts.generate_dataset.atomic_text_writer", side_effect=fail_manifest),
+        ):
+            config = load_config.return_value
+            config.profile.name = "test"
+            config.profile.unprocessed_data_dir = str(output_dir)
+            config.generation.model = "test/model"
+            config.generation.prompt = "Generate {n} about {topic}"
+            config.generation.batch_size = 1
+            config.generation.get_max_workers.return_value = 1
+            config.topics = [type("Topic", (), {"topic": "topic", "count": 1})()]
+            with pytest.raises(OSError, match="manifest write failed"):
+                generate_dataset(filename="failed-manifest.jsonl")
+
+        assert (output_dir / "failed-manifest.jsonl").exists()
+        assert (output_dir / "failed-manifest.jsonl.state.json").exists()

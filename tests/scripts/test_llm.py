@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import call, patch
+
 import pytest
 import requests
 import responses
@@ -82,14 +84,23 @@ class TestCallLlm:
         assert result == {"ok": True}
         assert len(responses.calls) == 2
 
+    @pytest.mark.parametrize(
+        ("status", "expected_delays"),
+        [(429, [4, 8, 16, 32]), (500, [2, 4, 8, 16])],
+    )
     @responses.activate
-    def test_500_exhausts_retries(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_http_error_exhausts_retries_without_final_sleep(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        status: int,
+        expected_delays: list[int],
+    ) -> None:
         monkeypatch.setenv("X", "fake-key")
         for _ in range(5):
             responses.add(
                 responses.POST,
                 "https://openrouter.ai/api/v1/chat/completions",
-                status=500,
+                status=status,
             )
         from training.config import ApiConfigBase
 
@@ -102,9 +113,11 @@ class TestCallLlm:
             batch_size=10,
             max_retries=5,
         )
-        result = call_llm(cfg, [{"role": "user", "content": "hello"}])
+        with patch("scripts._llm.time.sleep") as sleep:
+            result = call_llm(cfg, [{"role": "user", "content": "hello"}])
         assert result is None
         assert len(responses.calls) == 5
+        assert sleep.call_args_list == [call(delay) for delay in expected_delays]
 
     @responses.activate
     def test_timeout_exhausts_retries(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -124,9 +137,11 @@ class TestCallLlm:
             max_tokens=100,
             batch_size=10,
         )
-        result = call_llm(cfg, [{"role": "user", "content": "hello"}])
+        with patch("scripts._llm.time.sleep") as sleep:
+            result = call_llm(cfg, [{"role": "user", "content": "hello"}])
         assert result is None
         assert len(responses.calls) == 5
+        assert sleep.call_args_list == [call(2), call(4), call(8), call(16)]
 
     def test_missing_api_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("MISSING_KEY", raising=False)
