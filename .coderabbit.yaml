@@ -1,0 +1,94 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: "en-US"
+early_access: false
+
+reviews:
+  profile: "assertive"
+  request_changes_workflow: false
+  high_level_summary: true
+  high_level_summary_placeholder: "@coderabbitai summary"
+  changed_files_summary: true
+  sequence_diagrams: false
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT REVIEW"
+    base_branches:
+      - "master"
+
+  pre_merge_checks:
+    description:
+      mode: "warning"
+    docstrings:
+      mode: "off"
+
+  path_filters:
+    - "!data/**"
+    - "!checkpoints/**"
+    - "!export/**"
+    - "!models/**"
+    - "!unsloth_compiled_cache/**"
+    - "!.venv/**"
+    - "!**/__pycache__/**"
+    - "!**/.pytest_cache/**"
+    - "!**/.ruff_cache/**"
+    - "!uv.lock"
+
+  path_instructions:
+    - path: "training/**/*.py"
+      instructions: |
+        Review this as a clone-and-run LLM finetuning research pipeline, not as an installable package.
+        Prioritize concrete correctness issues in the CPT -> SFT -> export artifact flow, PEFT/LoRA adapter
+        continuity, trainable parameters, chat templates, EOS handling, loss masking, evaluation scheduling,
+        checkpoint resume behavior, precision support, dataset truncation, and GPU memory use.
+        Check assumptions against the dependency versions declared in pyproject.toml and uv.lock.
+        Distinguish runtime bugs from research choices; do not recommend changing hyperparameters without
+        evidence that the current value is incorrect or unsafe.
+
+    - path: "scripts/**/*.py"
+      instructions: |
+        Prioritize data loss, partial writes, malformed JSONL handling, schema drift, unsafe overwrite behavior,
+        retry and rate-limit errors, paid-API failure paths, interrupt handling, and concurrency correctness.
+        For Bengali and Banglish text, check Unicode normalization, combining marks, ZWJ/ZWNJ preservation,
+        script mixing, and whether deduplication could erase legitimate spelling or dialect variation.
+        Flag swallowed exceptions and provider-specific API assumptions that can silently lose or misclassify data.
+
+    - path: "configs/*.yaml"
+      instructions: |
+        Verify that fields match training/config.py and remain synchronized across tracked configurations.
+        Check dataset probabilities, dataset columns/configs/splits, checkpoint paths, and command compatibility.
+        Flag secrets, credentials, or environment-specific absolute paths. Treat training hyperparameter changes
+        as research-semantic changes that require clear intent and documentation.
+
+    - path: "tests/**/*.py"
+      instructions: |
+        Check that tests verify behavior and failure semantics rather than only asserting mocked calls.
+        Prioritize malformed data, empty/undersized datasets, interruption and resume, adapter continuity,
+        evaluation activation, Unicode edge cases, and atomic output behavior. Tests should not require a GPU,
+        network access, paid APIs, or real Hub mutations.
+
+    - path: "**/*.md"
+      instructions: |
+        Check that commands, paths, configuration fields, and dependency requirements match the implementation.
+        Treat model naturalness, safety, representativeness, and Bangla quality as research claims requiring
+        evidence. Flag missing data provenance, licensing caveats, evaluation limitations, or reproducibility details.
+
+    - path: "pyproject.toml"
+      instructions: |
+        Review clone-and-run reproducibility, locked dependency compatibility, Python/CUDA/build prerequisites,
+        and interactions among Unsloth, TRL, Transformers, Torch, xFormers, and CUDA package constraints.
+
+    - path: "justfile"
+      instructions: |
+        Verify that every task targets an existing script with the correct arguments and preserves the documented
+        clone-and-run workflow. Flag commands that are destructive, interactive, or unsafe to resume.
+
+chat:
+  auto_reply: true
