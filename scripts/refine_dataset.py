@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
 
+from scripts._data import validate_conversation
 from scripts._llm import call_llm
 from training.config import RefinementConfig, load_config
 
@@ -18,7 +19,10 @@ def check_batch_with_retry(
 ) -> tuple[int, list[dict], list[dict]]:
     """Check a single batch with retries. Returns (batch_idx, kept, removed_with_reasons)."""
     formatted = []
+    validated_batch = []
     for i, ex in enumerate(batch):
+        ex = validate_conversation(ex, f"batch {batch_idx} example {i}")
+        validated_batch.append(ex)
         post = ex["messages"][0]["content"]
         comment = ex["messages"][1]["content"]
         formatted.append(f"[{i}] Post: {post}\n    Comment: {comment}")
@@ -31,22 +35,23 @@ def check_batch_with_retry(
             {"role": "system", "content": refinement_prompt},
             {"role": "user", "content": prompt},
         ],
+        expected_type=dict,
     )
 
     if result is None:
         print(f"  [batch {batch_idx}] LLM call failed — keeping entire batch")
-        return batch_idx, batch, []
+        return batch_idx, validated_batch, []
 
     try:
         remove_indices = set(result.get("remove", []))
         reasons = result.get("reasons", {})
     except (AttributeError, TypeError):
         print(f"  [batch {batch_idx}] Unexpected response format — keeping entire batch")
-        return batch_idx, batch, []
+        return batch_idx, validated_batch, []
 
     kept = []
     removed = []
-    for i, example in enumerate(batch):
+    for i, example in enumerate(validated_batch):
         if i in remove_indices:
             removed.append(
                 {

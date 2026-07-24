@@ -154,6 +154,7 @@ class ApiConfigBase(BaseModel):
     batch_timeout: int = 120
     max_retries: int = 5
     max_workers: int | None = None
+    reasoning_effort: str | None = None
     prompt: str = ""
 
     @field_validator("temperature")

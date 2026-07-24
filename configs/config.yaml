@@ -62,6 +62,7 @@ generation:
   batch_timeout: 120
   max_retries: 5
   max_workers: ~
+  reasoning_effort: ~
   prompt: |
     Generate {n} Facebook post + comment pairs for Bengali LLM training data.
 
@@ -124,6 +125,7 @@ refinement:
   batch_timeout: 120
   max_retries: 5
   max_workers: ~
+  reasoning_effort: ~
   prompt: |
     You are a data quality checker for a Bengali LLM training dataset.
     You will receive a batch of training examples, each with an index, a post, and a comment.

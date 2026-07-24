@@ -18,6 +18,17 @@ class TestIsValidExample:
             ({"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": ""}]}, False),
             ({"messages": [{"role": "user", "content": "   "}, {"role": "assistant", "content": "hi"}]}, False),
             ({"messages": [{"role": None, "content": "hi"}, {"role": "assistant", "content": "hi"}]}, False),
+            ({"messages": [{"role": "assistant", "content": "hi"}, {"role": "user", "content": "bye"}]}, False),
+            (
+                {
+                    "messages": [
+                        {"role": "user", "content": "hi"},
+                        {"role": "assistant", "content": "bye"},
+                        {"role": "assistant", "content": "extra"},
+                    ]
+                },
+                False,
+            ),
             ({"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "bye"}]}, True),
         ],
     )
@@ -57,7 +68,7 @@ class TestGenerateTopic:
 
         call_count = 0
 
-        def fake_call_llm(llm_cfg, messages):
+        def fake_call_llm(llm_cfg, messages, expected_type=None):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -121,7 +132,7 @@ class TestGenerateDataset:
         valid_batch = [{"messages": [{"role": "user", "content": "p"}, {"role": "assistant", "content": "r"}]}]
         call_count = 0
 
-        def fake_call_llm(llm_cfg, messages):
+        def fake_call_llm(llm_cfg, messages, expected_type=None):
             nonlocal call_count
             call_count += 1
             if call_count == 1:

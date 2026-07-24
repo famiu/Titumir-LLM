@@ -4,7 +4,7 @@ import pytest
 import requests
 import responses
 
-from scripts._llm import SafeDict, call_llm, retry_delay
+from scripts._llm import call_llm, retry_delay
 
 
 class TestRetryDelay:
@@ -31,18 +31,6 @@ class TestRetryDelay:
 
     def test_attempt_7_still_capped(self) -> None:
         assert retry_delay(7) == 120.0
-
-
-class TestSafeDict:
-    def test_known_key_returns_value(self) -> None:
-        d = SafeDict({"a": 1, "b": 2})
-        assert d["a"] == 1
-        assert d["b"] == 2
-
-    def test_unknown_key_returns_braced_key(self) -> None:
-        d = SafeDict({})
-        assert d["missing"] == "{missing}"
-        assert d["anything"] == "{anything}"
 
 
 @pytest.mark.usefixtures("fast_retry")
@@ -195,3 +183,43 @@ class TestCallLlm:
         )
         result = call_llm(cfg, [{"role": "user", "content": "hello"}])
         assert result == {"k": "v"}
+
+    @responses.activate
+    def test_expected_response_type_is_enforced(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("X", "fake-key")
+        for _ in range(5):
+            responses.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                json={"choices": [{"message": {"content": '{"not":"a list"}'}}]},
+            )
+        from training.config import ApiConfigBase
+
+        cfg = ApiConfigBase(
+            endpoint="https://openrouter.ai/api/v1/chat/completions",
+            api_key_env="X",
+            model="test",
+            temperature=0.5,
+            max_tokens=100,
+            batch_size=10,
+        )
+        assert call_llm(cfg, [], expected_type=list) is None
+
+    @responses.activate
+    def test_reasoning_omitted_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("X", "fake-key")
+        responses.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            json={"choices": [{"message": {"content": "{}"}}]},
+        )
+        from training.config import ApiConfigBase
+
+        cfg = ApiConfigBase(
+            endpoint="https://openrouter.ai/api/v1/chat/completions",
+            api_key_env="X",
+            model="test",
+            temperature=0.5,
+            max_tokens=100,
+            batch_size=10,
+        )
+        call_llm(cfg, [])
+        assert "reasoning" not in responses.calls[0].request.body.decode()

@@ -6,22 +6,18 @@ from datetime import datetime
 from itertools import count
 from threading import Lock
 
-from scripts._llm import SafeDict, call_llm
+from scripts._data import validate_conversation, validate_prompt_fields
+from scripts._llm import call_llm
 from training.config import load_config
 
 
 def is_valid_example(example: dict) -> bool:
     """Check that an example has the expected structure."""
-    messages = example.get("messages", [])
-    return (
-        len(messages) >= 2
-        and isinstance(messages[0], dict)
-        and isinstance(messages[1], dict)
-        and isinstance(messages[0].get("role"), str)
-        and isinstance(messages[1].get("role"), str)
-        and bool(messages[0].get("content", "").strip())
-        and bool(messages[1].get("content", "").strip())
-    )
+    try:
+        validate_conversation(example)
+    except ValueError:
+        return False
+    return True
 
 
 def generate_topic(
@@ -43,18 +39,19 @@ def generate_topic(
         n = min(examples_for_topic - len(topic_examples), batch_size)
         print(f"  Batch #{batch_num} [topic {topic_idx}] — requesting {n} examples...")
 
-        generation_prompt = generation_prompt_template.format_map(SafeDict(n=n, topic=topic))
-        batch = call_llm(llm_cfg, [{"role": "user", "content": generation_prompt}])
+        generation_prompt = generation_prompt_template.format(n=n, topic=topic)
+        batch = call_llm(llm_cfg, [{"role": "user", "content": generation_prompt}], expected_type=list)
 
         if batch is None:
             print(f"  Batch #{batch_num} [topic {topic_idx}] failed — skipping")
             break
 
-        valid = [
-            {"messages": [{"role": m["role"], "content": m["content"]} for m in ex["messages"]]}
-            for ex in batch
-            if is_valid_example(ex)
-        ]
+        valid = []
+        for example in batch:
+            try:
+                valid.append(validate_conversation(example))
+            except ValueError:
+                continue
         invalid = len(batch) - len(valid)
 
         if invalid:
@@ -79,6 +76,7 @@ def generate_dataset(
 
     if not gen_cfg.prompt or not gen_cfg.prompt.strip():
         raise ValueError("Generation prompt not configured. Set 'prompt' in the 'generation' section of your config.")
+    validate_prompt_fields(gen_cfg.prompt, {"n", "topic"})
 
     output_dir = config.profile.unprocessed_data_dir
     os.makedirs(output_dir, exist_ok=True)
