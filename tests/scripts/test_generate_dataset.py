@@ -151,7 +151,6 @@ class TestGenerateDataset:
 
     def test_output_dir_created(self, tmp_path: pytest.TempPathFactory) -> None:
         out_dir = tmp_path / "unprocessed"
-        out_dir.mkdir()
 
         valid_batch = [{"messages": [{"role": "user", "content": "p"}, {"role": "assistant", "content": "r"}]}]
         call_count = 0
@@ -165,6 +164,7 @@ class TestGenerateDataset:
 
         with patch("scripts.generate_dataset.load_config") as mock_load:
             mock_cfg = mock_load.return_value
+            mock_cfg.profile.name = "test"
             mock_cfg.profile.unprocessed_data_dir = str(out_dir)
             mock_cfg.generation.model = "test/model"
             mock_cfg.generation.prompt = "Generate {n} about {topic}"

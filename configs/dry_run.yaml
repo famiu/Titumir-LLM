@@ -96,14 +96,11 @@ generation:
       → casual and natural, 1-2 sentences, light emoji 😭😂🔥
       → agree, react naturally, or add a small observation
 
-    STYLE EXAMPLES:
-    - "bhai eta ki hoise 😭 amader ki hobe"
-    - "vai seriously?? amio same rokom vabsi"
-    - "bhai এইটা দেইখা হাসতে হাসতে শেষ 😂"
-    - "shala eita dekhe hasbo naki kandbo 💀"
-    - "ekdom thik kotha, ami o ei rokom mone kori"
-    - "bhai এই বিষয়টা নিয়ে অনেকদিন ধরে ভাবছি, তুমি ঠিকই বলেছ"
-    - "disagree kori, kintu tomar point ta bujhte parchi"
+    DIVERSITY RULES:
+    - Vary openings, sentence structure, spelling, dialect, and emoji use across the batch
+    - Do not repeatedly begin comments with "bhai" or "vai"
+    - Avoid templated reactions and repeated catchphrases
+    - Preserve natural regional and individual variation without inventing fake words
 
     Output valid JSON array only. No preamble. No markdown fences.
 
@@ -141,8 +138,7 @@ refinement:
     - Is a brief but contextually appropriate reaction (even a single specific emoji or word)
     - Contains misspellings, typos, or non-standard spellings — these are natural and desirable
 
-    You must try to remove at least a few examples per batch, unless the data is genuinely perfect.
-    Almost all data has noise, so be careful.
+    Remove only examples that meet a listed defect; do not force removals from a clean batch.
 
     Output a JSON object only. No preamble. No markdown fences.
     Format:
