@@ -11,6 +11,13 @@ from trl import SFTConfig, SFTTrainer
 
 from scripts._data import conversation_key, validate_conversation
 from training.config import load_config
+from training.runtime import (
+    configure_seed,
+    ensure_trainable,
+    precision_args,
+    resolve_resume_checkpoint,
+    write_run_manifest,
+)
 
 
 def split_conversations(examples: list[dict], eval_split: float, seed: int = 42) -> tuple[list[dict], list[dict]]:
@@ -54,6 +61,7 @@ def run_sft(config_path: str | None = None, model=None, tokenizer=None) -> tuple
     model_cfg = config.model
     cpt_cfg = config.cpt_training
     sft_cfg = config.sft_training
+    configure_seed(config.seed)
 
     if model is None or tokenizer is None:
         if not os.path.isdir(cpt_cfg.checkpoint):
@@ -67,6 +75,7 @@ def run_sft(config_path: str | None = None, model=None, tokenizer=None) -> tuple
             max_seq_length=model_cfg.max_seq_length,
             load_in_4bit=model_cfg.load_in_4bit,
         )
+        ensure_trainable(model)
 
     local_path = Path(config.profile.local_dataset)
     if local_path.exists():
@@ -113,7 +122,7 @@ def run_sft(config_path: str | None = None, model=None, tokenizer=None) -> tuple
 
     eval_dataset = None
     if sft_cfg.eval_split is not None and sft_cfg.eval_split > 0:
-        train_examples, eval_examples = split_conversations(data, sft_cfg.eval_split)
+        train_examples, eval_examples = split_conversations(data, sft_cfg.eval_split, config.seed)
         print(f"Split dataset: {len(train_examples)} train, {len(eval_examples)} eval")
     else:
         train_examples = data
@@ -132,10 +141,13 @@ def run_sft(config_path: str | None = None, model=None, tokenizer=None) -> tuple
             prepared["metadata"] = metadata
         return prepared
 
-    dataset = Dataset.from_list([prepare_example(example) for example in train_examples]).shuffle(seed=42)
+    dataset = Dataset.from_list([prepare_example(example) for example in train_examples]).shuffle(seed=config.seed)
     if eval_examples:
-        eval_dataset = Dataset.from_list([prepare_example(example) for example in eval_examples]).shuffle(seed=42)
+        eval_dataset = Dataset.from_list([prepare_example(example) for example in eval_examples]).shuffle(
+            seed=config.seed
+        )
 
+    precision = precision_args()
     trainer = SFTTrainer(
         model=model,
         processing_class=tokenizer,
@@ -149,7 +161,8 @@ def run_sft(config_path: str | None = None, model=None, tokenizer=None) -> tuple
             num_train_epochs=sft_cfg.epochs,
             per_device_train_batch_size=sft_cfg.batch_size,
             gradient_accumulation_steps=sft_cfg.grad_accum,
-            bf16=True,
+            **precision,
+            seed=config.seed,
             logging_steps=10,
             save_steps=50,
             save_total_limit=2,
@@ -162,10 +175,27 @@ def run_sft(config_path: str | None = None, model=None, tokenizer=None) -> tuple
     )
 
     print("Starting SFT...")
-    trainer.train()
+    resume_checkpoint = resolve_resume_checkpoint(sft_cfg.resume_from_checkpoint, sft_cfg.output_dir)
+    train_output = trainer.train(resume_from_checkpoint=resume_checkpoint)
 
     model.save_pretrained(sft_cfg.checkpoint)
     tokenizer.save_pretrained(sft_cfg.checkpoint)
+    metrics = getattr(train_output, "metrics", {})
+    if not isinstance(metrics, dict):
+        metrics = {}
+    write_run_manifest(
+        "sft",
+        config,
+        sft_cfg.output_dir,
+        metrics,
+        {
+            "train_fingerprint": dataset._fingerprint,
+            "eval_fingerprint": eval_dataset._fingerprint if eval_dataset is not None else None,
+            "train_examples": len(dataset),
+            "eval_examples": len(eval_dataset) if eval_dataset is not None else 0,
+            "resume_checkpoint": resume_checkpoint,
+        },
+    )
     print(f"SFT complete — saved to {sft_cfg.checkpoint}")
 
     return model, tokenizer

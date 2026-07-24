@@ -5,6 +5,8 @@ profile:
   name: dry_run
   data_root: data
 
+seed: 42
+
 model:
   name: "unsloth/Qwen2.5-0.5B-Instruct"
   max_seq_length: 512
@@ -27,8 +29,8 @@ cpt_training:
   batch_size: 1
   grad_accum: 1
   eval_split: 0.1
-  assistant_only_loss: True
   packing: True
+  resume_from_checkpoint: False
 
 sft_training:
   output_dir: "./checkpoints/dry_sft"
@@ -38,6 +40,8 @@ sft_training:
   batch_size: 1
   grad_accum: 1
   eval_split: 0.1
+  assistant_only_loss: True
+  resume_from_checkpoint: False
 
 generation:
   endpoint: "https://openrouter.ai/api/v1/chat/completions"

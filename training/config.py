@@ -84,6 +84,7 @@ class CPTTrainingConfig(BaseModel):
     grad_accum: int = 4
     eval_split: float = 0.01
     packing: bool = True
+    resume_from_checkpoint: bool | str = False
 
     @field_validator("max_examples", "lora_r", "batch_size", "grad_accum", "epochs")
     @classmethod
@@ -129,6 +130,7 @@ class SFTTrainingConfig(BaseModel):
     grad_accum: int = 4
     eval_split: float | None = None
     assistant_only_loss: bool = True
+    resume_from_checkpoint: bool | str = False
 
     @field_validator("batch_size", "grad_accum", "epochs")
     @classmethod
@@ -254,6 +256,7 @@ class Config(BaseModel):
     """Root configuration class."""
 
     profile: ProfileConfig
+    seed: int = 42
     model: ModelConfig = Field(default_factory=ModelConfig)
     cpt_training: CPTTrainingConfig = Field(default_factory=CPTTrainingConfig)
     sft_training: SFTTrainingConfig = Field(default_factory=SFTTrainingConfig)
@@ -261,6 +264,13 @@ class Config(BaseModel):
     refinement: RefinementConfig = Field(default_factory=RefinementConfig)
     export: ExportConfig = Field(default_factory=ExportConfig)
     topics: list[TopicEntry] = Field(default_factory=list)
+
+    @field_validator("seed")
+    @classmethod
+    def seed_non_negative(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("seed must be non-negative")
+        return v
 
     @model_validator(mode="after")
     def topics_required_if_generation(self) -> Config:

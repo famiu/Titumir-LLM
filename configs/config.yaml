@@ -3,6 +3,8 @@ profile:
   data_root: data
   hf_dataset: "famiu/titumir-sft-dataset"
 
+seed: 42
+
 model:
   name: "Qwen/Qwen3.5-9B"
   max_seq_length: 2048
@@ -44,6 +46,7 @@ cpt_training:
   grad_accum: 4
   eval_split: 0.01
   packing: True
+  resume_from_checkpoint: False
 
 sft_training:
   output_dir: "./checkpoints/sft"
@@ -54,6 +57,7 @@ sft_training:
   grad_accum: 4
   eval_split: 0.1
   assistant_only_loss: True
+  resume_from_checkpoint: False
 
 generation:
   endpoint: "https://openrouter.ai/api/v1/chat/completions"

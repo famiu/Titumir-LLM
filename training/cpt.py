@@ -7,6 +7,7 @@ from datasets import concatenate_datasets, interleave_datasets, load_dataset
 from trl import SFTConfig, SFTTrainer
 
 from training.config import load_config
+from training.runtime import configure_seed, precision_args, resolve_resume_checkpoint, write_run_manifest
 
 
 def run_cpt(config_path: str | None = None, model=None, tokenizer=None) -> tuple:
@@ -14,6 +15,7 @@ def run_cpt(config_path: str | None = None, model=None, tokenizer=None) -> tuple
     config = load_config(config_path)
     model_cfg = config.model
     cpt_cfg = config.cpt_training
+    configure_seed(config.seed)
 
     if model is None or tokenizer is None:
         model, tokenizer = FastLanguageModel.from_pretrained(
@@ -38,7 +40,7 @@ def run_cpt(config_path: str | None = None, model=None, tokenizer=None) -> tuple
         lora_dropout=0,
         bias="none",
         use_gradient_checkpointing="unsloth",
-        random_state=42,
+        random_state=config.seed,
     )
 
     # ── Load and interleave datasets from config ─────────────────────────
@@ -71,7 +73,7 @@ def run_cpt(config_path: str | None = None, model=None, tokenizer=None) -> tuple
         print(f"  Kept {len(ds)}/{before_filter} non-empty examples")
         if len(ds) < 2:
             raise ValueError(f"CPT dataset '{entry.path}' needs at least two non-empty examples for evaluation")
-        split = ds.train_test_split(test_size=cpt_cfg.eval_split, seed=42)
+        split = ds.train_test_split(test_size=cpt_cfg.eval_split, seed=config.seed)
         source_name = entry.path if entry.config is None else f"{entry.path}/{entry.config}"
         train_ds = split["train"].add_column("source", [source_name] * len(split["train"]))
         eval_ds = split["test"].add_column("source", [source_name] * len(split["test"]))
@@ -82,21 +84,22 @@ def run_cpt(config_path: str | None = None, model=None, tokenizer=None) -> tuple
     interleaved = interleave_datasets(
         loaded_datasets,
         probabilities=probabilities,
-        seed=42,
+        seed=config.seed,
         stopping_strategy="all_exhausted_without_replacement",
     )
     available = len(interleaved)
     selected = min(cpt_cfg.max_examples, available)
     if selected < cpt_cfg.max_examples:
         print(f"Requested {cpt_cfg.max_examples} CPT examples, but only {available} are available")
-    raw_dataset = interleaved.shuffle(seed=42).select(range(selected))
-    eval_dataset = concatenate_datasets(eval_datasets).shuffle(seed=42)
+    raw_dataset = interleaved.shuffle(seed=config.seed).select(range(selected))
+    eval_dataset = concatenate_datasets(eval_datasets).shuffle(seed=config.seed)
 
     print(f"Total CPT examples: {len(raw_dataset)}")
     realized = Counter(raw_dataset["source"])
     for source, count in sorted(realized.items()):
         print(f"  Realized source mix: {source}: {count} ({count / len(raw_dataset):.1%})")
 
+    precision = precision_args()
     trainer = SFTTrainer(
         model=model,
         processing_class=tokenizer,
@@ -110,7 +113,8 @@ def run_cpt(config_path: str | None = None, model=None, tokenizer=None) -> tuple
             num_train_epochs=cpt_cfg.epochs,
             per_device_train_batch_size=cpt_cfg.batch_size,
             gradient_accumulation_steps=cpt_cfg.grad_accum,
-            bf16=True,
+            **precision,
+            seed=config.seed,
             logging_steps=10,
             save_steps=100,
             save_total_limit=2,
@@ -123,7 +127,8 @@ def run_cpt(config_path: str | None = None, model=None, tokenizer=None) -> tuple
     )
 
     print("Starting CPT...")
-    trainer.train()
+    resume_checkpoint = resolve_resume_checkpoint(cpt_cfg.resume_from_checkpoint, cpt_cfg.output_dir)
+    train_output = trainer.train(resume_from_checkpoint=resume_checkpoint)
     eval_metrics = trainer.evaluate()
     eval_loss = eval_metrics.get("eval_loss")
     if eval_loss is not None:
@@ -132,6 +137,23 @@ def run_cpt(config_path: str | None = None, model=None, tokenizer=None) -> tuple
 
     model.save_pretrained(cpt_cfg.checkpoint)
     tokenizer.save_pretrained(cpt_cfg.checkpoint)
+    train_metrics = getattr(train_output, "metrics", {})
+    if not isinstance(train_metrics, dict):
+        train_metrics = {}
+    write_run_manifest(
+        "cpt",
+        config,
+        cpt_cfg.output_dir,
+        {**train_metrics, **eval_metrics},
+        {
+            "train_fingerprint": raw_dataset._fingerprint,
+            "eval_fingerprint": eval_dataset._fingerprint,
+            "train_examples": len(raw_dataset),
+            "eval_examples": len(eval_dataset),
+            "source_counts": dict(realized),
+            "resume_checkpoint": resume_checkpoint,
+        },
+    )
     print(f"CPT complete — saved to {cpt_cfg.checkpoint}")
 
     return model, tokenizer

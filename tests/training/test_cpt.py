@@ -20,8 +20,10 @@ def test_cpt_caps_examples_filters_text_and_evaluates() -> None:
         patch("training.cpt.load_dataset", return_value=source),
         patch("training.cpt.FastLanguageModel.get_peft_model", return_value=peft_model),
         patch("training.cpt.SFTTrainer", return_value=trainer) as trainer_class,
+        patch("training.cpt.write_run_manifest"),
     ):
         config = load_config.return_value
+        config.seed = 42
         config.model.max_seq_length = 128
         config.cpt_training.datasets = [
             type(
@@ -33,6 +35,7 @@ def test_cpt_caps_examples_filters_text_and_evaluates() -> None:
         config.cpt_training.max_examples = 100
         config.cpt_training.eval_split = 0.2
         config.cpt_training.packing = True
+        config.cpt_training.resume_from_checkpoint = False
         config.cpt_training.lora_r = 8
         config.cpt_training.lora_alpha = 16
         config.cpt_training.learning_rate = 1e-5
@@ -49,5 +52,5 @@ def test_cpt_caps_examples_filters_text_and_evaluates() -> None:
     assert len(kwargs["eval_dataset"]) == 1
     assert kwargs["args"].packing is True
     assert kwargs["args"].eval_strategy == "epoch"
-    trainer.train.assert_called_once()
+    trainer.train.assert_called_once_with(resume_from_checkpoint=None)
     trainer.evaluate.assert_called_once()
