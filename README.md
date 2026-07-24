@@ -22,7 +22,9 @@ output suitable for persona-driven conversational agents.
 ## Requirements
 
 - Python 3.11–3.13
-- CUDA 12.4 compatible GPU (24GB+ VRAM recommended for training)
+- NVIDIA GPU with BF16 or FP16 support (24GB+ VRAM recommended for training)
+- An NVIDIA driver compatible with the CUDA 12.8 runtime used by the locked PyTorch wheel
+- A C/C++ compiler, CUDA development toolkit, and Ninja for the intentional xFormers source build
 - [uv](https://github.com/astral-sh/uv)
 - [just](https://github.com/casey/just)
 
@@ -35,6 +37,10 @@ git clone https://github.com/famiuhaque/titumir-llm
 cd titumir-llm
 uv sync
 ```
+
+`uv sync` builds xFormers from source so it matches the locked PyTorch/CUDA stack. This can take several minutes and
+requires a working compiler and CUDA headers. The local CUDA toolkit version and the CUDA runtime bundled with the
+PyTorch wheel are separate; the NVIDIA driver must be new enough for the bundled CUDA 12.8 runtime.
 
 ### Environment Variables
 
@@ -108,6 +114,9 @@ just dry-run
 # Regenerate dataset first, then run full pipeline
 just dry-run -r
 ```
+
+The dry run uses a much smaller Qwen2.5 model and validates pipeline wiring only. It does not validate Qwen3.5 model
+compatibility, production VRAM requirements, final quality, or production GGUF behavior.
 
 ### Utilities
 

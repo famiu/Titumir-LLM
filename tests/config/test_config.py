@@ -418,6 +418,10 @@ class TestConfig:
         with pytest.raises(FileNotFoundError):
             load_config("nonexistent.yaml")
 
+    def test_cpt_training_is_required(self) -> None:
+        with pytest.raises(ValueError, match="cpt_training"):
+            Config.model_validate({"profile": {"name": "test"}})
+
     def test_from_yaml_loads_all_sections(self, dummy_config: Config) -> None:
         assert dummy_config.profile.name == "dry_run"
         assert dummy_config.model.name == "unsloth/Qwen2.5-0.5B-Instruct"

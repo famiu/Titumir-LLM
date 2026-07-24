@@ -272,7 +272,7 @@ class Config(BaseModel):
     profile: ProfileConfig
     seed: int = 42
     model: ModelConfig = Field(default_factory=ModelConfig)
-    cpt_training: CPTTrainingConfig = Field(default_factory=CPTTrainingConfig)
+    cpt_training: CPTTrainingConfig
     sft_training: SFTTrainingConfig = Field(default_factory=SFTTrainingConfig)
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     refinement: RefinementConfig = Field(default_factory=RefinementConfig)
@@ -314,7 +314,7 @@ class Config(BaseModel):
 def load_config(path: str | Path | None = None) -> Config:
     """Load configuration from a YAML file. Defaults to configs/config.yaml."""
     if path is None:
-        path = Path("configs/config.yaml")
+        path = Path(__file__).resolve().parent.parent / "configs" / "config.yaml"
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")

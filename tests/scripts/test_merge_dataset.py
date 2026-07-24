@@ -120,8 +120,8 @@ class TestMergeDatasets:
         assert "no jsonl files" in captured.out.lower()
 
 
-class TestConcurrencyStress:
-    def test_concurrent_batch_processing(self, tmp_path: pytest.TempPathFactory, sample_a_path: Path) -> None:
+class TestMergeOutput:
+    def test_complete_file_is_written(self, tmp_path: pytest.TempPathFactory, sample_a_path: Path) -> None:
         refined_dir = tmp_path / "refined"
         refined_dir.mkdir()
 
