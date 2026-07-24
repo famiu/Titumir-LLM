@@ -170,6 +170,7 @@ def generate_dataset(
     print(f"Using LLM: {gen_cfg.model}")
 
     executor = ThreadPoolExecutor(max_workers=max_workers)
+    futures = {}
     try:
         global_batch_counter = count(1)
         futures = {

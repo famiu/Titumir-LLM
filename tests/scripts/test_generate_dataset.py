@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -238,3 +238,27 @@ class TestGenerateDataset:
         lines = [json.loads(line) for line in output_file.read_text().splitlines()]
         assert [line["messages"][0]["content"] for line in lines] == ["p1", "p2"]
         assert not state_file.exists()
+
+    def test_interrupt_during_submission_saves_empty_state(self, tmp_path: pytest.TempPathFactory) -> None:
+        output_dir = tmp_path / "unprocessed"
+        executor = MagicMock()
+        executor.submit.side_effect = KeyboardInterrupt
+
+        with (
+            patch("scripts.generate_dataset.load_config") as load_config,
+            patch("scripts.generate_dataset.ThreadPoolExecutor", return_value=executor),
+        ):
+            config = load_config.return_value
+            config.profile.name = "test"
+            config.profile.unprocessed_data_dir = str(output_dir)
+            config.generation.model = "test/model"
+            config.generation.prompt = "Generate {n} about {topic}"
+            config.generation.batch_size = 1
+            config.generation.get_max_workers.return_value = 1
+            config.topics = [type("Topic", (), {"topic": "topic", "count": 1})()]
+            with pytest.raises(KeyboardInterrupt):
+                generate_dataset(filename="interrupted.jsonl")
+
+        executor.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
+        state = json.loads((output_dir / "interrupted.jsonl.state.json").read_text())
+        assert state["completed"] == {}

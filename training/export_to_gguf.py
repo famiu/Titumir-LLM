@@ -12,6 +12,25 @@ from scripts._data import atomic_text_writer, file_sha256
 from training.config import load_config
 
 
+def discover_gguf_files(export_prefix: Path) -> set[Path]:
+    """Find GGUF files matching an export prefix."""
+    candidates = [export_prefix, Path(f"{export_prefix}_gguf")]
+    files = set()
+    for candidate in candidates:
+        if candidate.is_dir():
+            files.update(path.resolve() for path in candidate.glob("*.gguf"))
+        elif candidate.is_file() and candidate.suffix == ".gguf":
+            files.add(candidate.resolve())
+    files.update(path.resolve() for path in export_prefix.parent.glob(f"{export_prefix.name}*.gguf"))
+    return files
+
+
+def artifact_signature(path: Path) -> tuple[int, int]:
+    """Return attributes that change when an export artifact is rewritten."""
+    stat = path.stat()
+    return stat.st_size, stat.st_mtime_ns
+
+
 def export_gguf(config_path: str | None = None, model=None, tokenizer=None) -> None:
     """Merge SFT adapter and export to GGUF for local inference."""
     config = load_config(config_path)
@@ -26,21 +45,20 @@ def export_gguf(config_path: str | None = None, model=None, tokenizer=None) -> N
             load_in_4bit=model_cfg.load_in_4bit,
         )
 
+    export_prefix = Path(export_cfg.path)
+    existing_files = {path: artifact_signature(path) for path in discover_gguf_files(export_prefix)}
+
     model.save_pretrained_gguf(
         export_cfg.path,
         tokenizer,
         quantization_method=export_cfg.quantization_method,
     )
-    export_prefix = Path(export_cfg.path)
-    output_candidates = [export_prefix, Path(f"{export_cfg.path}_gguf")]
-    gguf_files = []
-    for candidate in output_candidates:
-        if candidate.is_dir():
-            gguf_files.extend(candidate.glob("*.gguf"))
-        elif candidate.is_file() and candidate.suffix == ".gguf":
-            gguf_files.append(candidate)
-    gguf_files.extend(export_prefix.parent.glob(f"{export_prefix.name}*.gguf"))
-    gguf_files = sorted(set(path.resolve() for path in gguf_files))
+    discovered_files = discover_gguf_files(export_prefix)
+    gguf_files = sorted(
+        path
+        for path in discovered_files
+        if path not in existing_files or artifact_signature(path) != existing_files[path]
+    )
     if not gguf_files:
         raise FileNotFoundError(f"GGUF export completed but no output file was found for prefix {export_cfg.path}")
 

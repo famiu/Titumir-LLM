@@ -52,6 +52,8 @@ def run_cpt(config_path: str | None = None, model=None, tokenizer=None) -> tuple
         load_kwargs = {}
         if entry.config:
             load_kwargs["name"] = entry.config
+        if entry.revision:
+            load_kwargs["revision"] = entry.revision
         try:
             ds = load_dataset(entry.path, **load_kwargs, split=entry.split)
         except Exception as e:
@@ -153,6 +155,7 @@ def run_cpt(config_path: str | None = None, model=None, tokenizer=None) -> tuple
             "train_examples": len(raw_dataset),
             "eval_examples": len(eval_dataset),
             "source_counts": dict(realized),
+            "sources": [entry.model_dump(mode="json") for entry in cpt_cfg.datasets],
             "resume_checkpoint": resume_checkpoint,
         },
     )

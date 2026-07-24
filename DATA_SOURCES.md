@@ -9,13 +9,13 @@ examples, model weights, or outputs from external model providers.
 
 ## Continued Pretraining Sources
 
-| Dataset | Config and split | Intended signal | License/provenance action |
-| --- | --- | --- | --- |
-| [BanglishRev/bangla-english-and-code-mixed-ecommerce-review-dataset](https://huggingface.co/datasets/BanglishRev/bangla-english-and-code-mixed-ecommerce-review-dataset) | `train`, column `review` | Informal Bengali-English reviews | Verify the dataset card, original collection consent, commercial-use terms, and redistribution rights. Treat as unresolved until recorded in the run report. |
-| [sanzanalora/Ben-Sarc](https://huggingface.co/datasets/sanzanalora/Ben-Sarc) | `train`, column `Comments` | Bengali social comments and sarcasm | Verify the dataset card, upstream source, privacy handling, and license. Treat as unresolved until recorded in the run report. |
-| [allenai/c4](https://huggingface.co/datasets/allenai/c4) | `bn`, `train[:60000]` | Bengali web text | Review the dataset card and Common Crawl-derived terms. Record attribution and filtering obligations for the selected revision. |
-| [statmt/cc100](https://huggingface.co/datasets/statmt/cc100) | `bn_rom`, `train[:20000]` | Romanized Bengali web text | Review the dataset card, CC100 paper, source crawl terms, and redistribution conditions for the selected revision. |
-| [wikimedia/wikipedia](https://huggingface.co/datasets/wikimedia/wikipedia) | `20231101.bn`, `train[:10000]` | Formal Bengali reference text | Wikimedia content generally carries attribution and share-alike obligations. Verify the exact dump terms and preserve required attribution. |
+| Dataset | Config and split | Immutable Hub revision | Retrieved | Intended signal | License/provenance action |
+| --- | --- | --- | --- | --- | --- |
+| [BanglishRev/bangla-english-and-code-mixed-ecommerce-review-dataset](https://huggingface.co/datasets/BanglishRev/bangla-english-and-code-mixed-ecommerce-review-dataset) | `train`, column `review` | `38c97cd4255799359b612bafb721e3c442bc0851` | `2026-07-24` | Informal Bengali-English reviews | Verify the dataset card, original collection consent, commercial-use terms, and redistribution rights. Treat as unresolved until recorded in the run report. |
+| [sanzanalora/Ben-Sarc](https://huggingface.co/datasets/sanzanalora/Ben-Sarc) | `train`, column `Comments` | `3bc2ba28968d2a18e17aebae85f7dab23d18302d` | `2026-07-24` | Bengali social comments and sarcasm | Verify the dataset card, upstream source, privacy handling, and license. Treat as unresolved until recorded in the run report. |
+| [allenai/c4](https://huggingface.co/datasets/allenai/c4) | `bn`, `train[:60000]` | `1588ec454efa1a09f29cd18ddd04fe05fc8653a2` | `2026-07-24` | Bengali web text | Review the dataset card and Common Crawl-derived terms. Record attribution and filtering obligations for the selected revision. |
+| [statmt/cc100](https://huggingface.co/datasets/statmt/cc100) | `bn_rom`, `train[:20000]` | `8c658c983d32eab9170d77d416252cfaa0c23e96` | `2026-07-24` | Romanized Bengali web text | Review the dataset card, CC100 paper, source crawl terms, and redistribution conditions for the selected revision. |
+| [wikimedia/wikipedia](https://huggingface.co/datasets/wikimedia/wikipedia) | `20231101.bn`, `train[:10000]` | `b04c8d1ceb2f5cd4588862100d08de323dccfbaa` | `2026-07-24` | Formal Bengali reference text | Wikimedia content generally carries attribution and share-alike obligations. Verify the exact dump terms and preserve required attribution. |
 
 ## Supervised Finetuning Data
 
@@ -39,8 +39,12 @@ additional quality and overlap statistics without modifying the source dataset.
   of Banglish.
 - The same or related web content may occur in C4, CC100, Wikipedia mirrors, synthetic outputs, and evaluation
   material.
-- Unicode-normalization-equivalent Bengali strings are deduplicated, but fuzzy matches are reported rather
-  than automatically removed to avoid erasing legitimate spelling and dialect variation.
+- Deduplication builds a canonical JSON key from the ordered `user` and `assistant` roles and their content.
+  Content is normalized to Unicode NFC and whitespace runs are collapsed for this comparison key only; emitted
+  Bengali text remains unchanged. NFC composes canonically equivalent combining sequences where Unicode defines
+  a composed form, while combining marks without such a form and explicit ZWJ/ZWNJ code points remain significant
+  and are not stripped. Fuzzy similarities are surfaced through audit overlap and repeated-phrase statistics rather
+  than automatically removed, avoiding silent loss of legitimate spelling, script, or dialect variation.
 - A low training or evaluation loss does not establish factuality, safety, cultural representativeness, or
   human-perceived naturalness.
 

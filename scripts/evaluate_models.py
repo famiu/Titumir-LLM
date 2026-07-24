@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import os
 import subprocess
@@ -84,18 +85,26 @@ def evaluate_models(config_path: str | None = None, output: str | None = None, g
         if label != "base" and not Path(model_path).is_dir():
             results["models"][label] = {"path": model_path, "status": "missing"}
             continue
-        responses = generate_responses(
-            model_path,
-            config.evaluation.prompts,
-            config.evaluation.max_new_tokens,
-            config.model.max_seq_length,
-        )
+        try:
+            responses = generate_responses(
+                model_path,
+                config.evaluation.prompts,
+                config.evaluation.max_new_tokens,
+                config.model.max_seq_length,
+            )
+        finally:
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
         results["models"][label] = {"path": model_path, "status": "evaluated", "responses": responses}
 
     if gguf is not None:
-        results["gguf_smoke"] = run_gguf_smoke(
-            Path(gguf), config.evaluation.prompts[0], config.evaluation.max_new_tokens
-        )
+        try:
+            results["gguf_smoke"] = run_gguf_smoke(
+                Path(gguf), config.evaluation.prompts[0], config.evaluation.max_new_tokens
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            results["gguf_smoke"] = {"status": "failed", "error": str(error)}
 
     output_path = Path(output or "evaluation/results.json")
     with atomic_text_writer(output_path) as file:

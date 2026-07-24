@@ -19,6 +19,8 @@ cpt_training:
       config: "20231101.bn"
       column: "text"
       probability: 1.0
+      revision: "b04c8d1ceb2f5cd4588862100d08de323dccfbaa"
+      retrieved_at: "2026-07-24"
   max_examples: 10
   output_dir: "./checkpoints/dry_cpt"
   checkpoint: "./checkpoints/dry_cpt_final"

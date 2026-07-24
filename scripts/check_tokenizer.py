@@ -66,6 +66,7 @@ def check_tokenizer(config_path: str | None = None, dataset_path: str | None = N
     tokenizer = AutoTokenizer.from_pretrained(config.model.name)
 
     print(f"Model: {config.model.name}\n")
+    print("Truncation estimates use raw content tokens only; chat role markers and special tokens are excluded.\n")
     print(f"{'Test':<25} {'Codepts':>7} {'Graphs':>7} {'Tokens':>7} {'Tok/Graph':>10} {'Script':>8}")
     print("-" * 78)
 

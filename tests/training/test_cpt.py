@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from datasets import Dataset
 
+from training.config import CPTDatasetEntry
 from training.cpt import run_cpt
 
 
@@ -17,20 +18,23 @@ def test_cpt_caps_examples_filters_text_and_evaluates() -> None:
 
     with (
         patch("training.cpt.load_config") as load_config,
-        patch("training.cpt.load_dataset", return_value=source),
+        patch("training.cpt.load_dataset", return_value=source) as load_dataset,
         patch("training.cpt.FastLanguageModel.get_peft_model", return_value=peft_model),
         patch("training.cpt.SFTTrainer", return_value=trainer) as trainer_class,
-        patch("training.cpt.write_run_manifest"),
+        patch("training.cpt.write_run_manifest") as write_manifest,
     ):
         config = load_config.return_value
         config.seed = 42
         config.model.max_seq_length = 128
         config.cpt_training.datasets = [
-            type(
-                "Entry",
-                (),
-                {"path": "test/source", "split": "train", "config": None, "column": "text", "probability": 1.0},
-            )()
+            CPTDatasetEntry(
+                path="test/source",
+                split="train",
+                column="text",
+                probability=1.0,
+                revision="abc123",
+                retrieved_at="2026-07-24",
+            )
         ]
         config.cpt_training.max_examples = 100
         config.cpt_training.eval_split = 0.2
@@ -54,3 +58,7 @@ def test_cpt_caps_examples_filters_text_and_evaluates() -> None:
     assert kwargs["args"].eval_strategy == "epoch"
     trainer.train.assert_called_once_with(resume_from_checkpoint=None)
     trainer.evaluate.assert_called_once()
+    load_dataset.assert_called_once_with("test/source", revision="abc123", split="train")
+    manifest_dataset = write_manifest.call_args.args[4]
+    assert manifest_dataset["sources"][0]["revision"] == "abc123"
+    assert manifest_dataset["sources"][0]["retrieved_at"] == "2026-07-24"

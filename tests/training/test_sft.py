@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-from training.sft import run_sft, split_conversations
+from training.sft import fingerprint_examples, run_sft, split_conversations
 
 
 def make_example(index: int, topic: str = "topic") -> dict:
@@ -28,6 +28,12 @@ def test_grouped_split_is_deterministic_and_disjoint() -> None:
     assert split_conversations(examples, 0.2) == (train, evaluation)
 
 
+def test_example_fingerprint_is_stable_and_order_sensitive() -> None:
+    examples = [make_example(1), make_example(2)]
+    assert fingerprint_examples(examples) == fingerprint_examples(json.loads(json.dumps(examples)))
+    assert fingerprint_examples(examples) != fingerprint_examples(list(reversed(examples)))
+
+
 def test_sft_uses_prompt_completion_and_evaluation(tmp_path) -> None:
     dataset_path = tmp_path / "dataset.jsonl"
     examples = [make_example(index) for index in range(10)]
@@ -40,7 +46,7 @@ def test_sft_uses_prompt_completion_and_evaluation(tmp_path) -> None:
     with (
         patch("training.sft.load_config") as load_config,
         patch("training.sft.SFTTrainer", return_value=trainer) as trainer_class,
-        patch("training.sft.write_run_manifest"),
+        patch("training.sft.write_run_manifest") as write_manifest,
     ):
         config = load_config.return_value
         config.seed = 42
@@ -64,6 +70,9 @@ def test_sft_uses_prompt_completion_and_evaluation(tmp_path) -> None:
     assert kwargs["args"].completion_only_loss is True
     assert kwargs["args"].eval_strategy == "epoch"
     trainer.train.assert_called_once_with(resume_from_checkpoint=None)
+    manifest_dataset = write_manifest.call_args.args[4]
+    assert len(manifest_dataset["train_fingerprint"]) == 64
+    assert len(manifest_dataset["eval_fingerprint"]) == 64
 
 
 def test_sft_reports_malformed_line(tmp_path) -> None:

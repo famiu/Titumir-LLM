@@ -20,6 +20,16 @@ from training.runtime import (
 )
 
 
+def fingerprint_examples(examples: list[dict]) -> str:
+    """Hash materialized examples using stable canonical JSON."""
+    digest = hashlib.sha256()
+    for example in examples:
+        encoded = json.dumps(example, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+    return digest.hexdigest()
+
+
 def split_conversations(examples: list[dict], eval_split: float, seed: int = 42) -> tuple[list[dict], list[dict]]:
     """Split normalized conversation groups while preserving topic proportions."""
     grouped: dict[str, dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
@@ -141,11 +151,13 @@ def run_sft(config_path: str | None = None, model=None, tokenizer=None) -> tuple
             prepared["metadata"] = metadata
         return prepared
 
-    dataset = Dataset.from_list([prepare_example(example) for example in train_examples]).shuffle(seed=config.seed)
-    if eval_examples:
-        eval_dataset = Dataset.from_list([prepare_example(example) for example in eval_examples]).shuffle(
-            seed=config.seed
-        )
+    prepared_train = [prepare_example(example) for example in train_examples]
+    prepared_eval = [prepare_example(example) for example in eval_examples]
+    train_fingerprint = fingerprint_examples(prepared_train)
+    eval_fingerprint = fingerprint_examples(prepared_eval) if prepared_eval else None
+    dataset = Dataset.from_list(prepared_train).shuffle(seed=config.seed)
+    if prepared_eval:
+        eval_dataset = Dataset.from_list(prepared_eval).shuffle(seed=config.seed)
 
     precision = precision_args()
     trainer = SFTTrainer(
@@ -189,8 +201,8 @@ def run_sft(config_path: str | None = None, model=None, tokenizer=None) -> tuple
         sft_cfg.output_dir,
         metrics,
         {
-            "train_fingerprint": dataset._fingerprint,
-            "eval_fingerprint": eval_dataset._fingerprint if eval_dataset is not None else None,
+            "train_fingerprint": train_fingerprint,
+            "eval_fingerprint": eval_fingerprint,
             "train_examples": len(dataset),
             "eval_examples": len(eval_dataset) if eval_dataset is not None else 0,
             "resume_checkpoint": resume_checkpoint,

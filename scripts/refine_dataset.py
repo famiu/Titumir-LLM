@@ -9,6 +9,8 @@ from scripts._data import atomic_text_writer, file_sha256, validate_conversation
 from scripts._llm import call_llm
 from training.config import RefinementConfig, load_config
 
+CHECKPOINT_INTERVAL = 10
+
 
 def check_batch_with_retry(
     batch_idx: int,
@@ -166,7 +168,8 @@ def refine_file(
                 ) from error
             serialized_results[str(batch_idx)] = {"kept": kept, "removed": removed}
             completed += 1
-            save_state()
+            if completed % CHECKPOINT_INTERVAL == 0 or completed == total_batches:
+                save_state()
             print(
                 f"  [{completed}/{total_batches}] batch {batch_idx} checkpointed — "
                 f"{len(kept)} kept, {len(removed)} removed"
@@ -284,6 +287,7 @@ def refine_dataset(
 
     try:
         for file in pending:
+            state_file = refined_path / f"{file.name}.state.json"
             refine_file(
                 file,
                 refined_dir,
@@ -291,7 +295,7 @@ def refine_dataset(
                 ref_cfg,
                 ref_cfg.prompt,
                 ref_cfg.batch_size,
-                resume=resume,
+                resume=resume and state_file.exists(),
             )
     except KeyboardInterrupt:
         print("\nInterrupted")

@@ -97,7 +97,7 @@ just push-dataset
 # Pull dataset from HuggingFace Hub to local
 just pull-dataset
 
-# Explicitly replace an existing local Hub dataset
+# Explicitly overwrite the existing local dataset copy; the remote Hub dataset is unchanged
 just pull-dataset --overwrite
 ```
 

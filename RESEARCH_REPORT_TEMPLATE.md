@@ -8,7 +8,15 @@
 - Base model and revision:
 - Config file and hash:
 - CPT/SFT run manifest paths:
-- Hardware and training duration:
+- `uv.lock` path and hash:
+- Python version:
+- CUDA runtime version:
+- NVIDIA driver version:
+- CUDA toolkit version:
+- C/C++ compiler and version:
+- Ninja/CMake versions:
+- Hardware:
+- Training duration:
 
 ## Data
 

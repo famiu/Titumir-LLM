@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -60,6 +61,8 @@ class CPTDatasetEntry(BaseModel):
     config: str | None = None
     column: str = "text"
     probability: float
+    revision: str | None = None
+    retrieved_at: date | None = None
 
     @field_validator("probability")
     @classmethod
@@ -283,8 +286,8 @@ class Config(BaseModel):
     @field_validator("seed")
     @classmethod
     def seed_non_negative(cls, v: int) -> int:
-        if v < 0:
-            raise ValueError("seed must be non-negative")
+        if v < 0 or v > 4_294_967_295:
+            raise ValueError("seed must be between 0 and 4294967295")
         return v
 
     @model_validator(mode="after")

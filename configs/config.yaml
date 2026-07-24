@@ -16,25 +16,35 @@ cpt_training:
       split: "train"
       column: "review"
       probability: 0.40
+      revision: "38c97cd4255799359b612bafb721e3c442bc0851"
+      retrieved_at: "2026-07-24"
     - path: "sanzanalora/Ben-Sarc"
       split: "train"
       column: "Comments"
       probability: 0.25
+      revision: "3bc2ba28968d2a18e17aebae85f7dab23d18302d"
+      retrieved_at: "2026-07-24"
     - path: "allenai/c4"
       split: "train[:60000]"
       config: "bn"
       column: "text"
       probability: 0.20
+      revision: "1588ec454efa1a09f29cd18ddd04fe05fc8653a2"
+      retrieved_at: "2026-07-24"
     - path: "statmt/cc100"
       split: "train[:20000]"
       config: "bn_rom"
       column: "text"
       probability: 0.10
+      revision: "8c658c983d32eab9170d77d416252cfaa0c23e96"
+      retrieved_at: "2026-07-24"
     - path: "wikimedia/wikipedia"
       split: "train[:10000]"
       config: "20231101.bn"
       column: "text"
       probability: 0.05
+      revision: "b04c8d1ceb2f5cd4588862100d08de323dccfbaa"
+      retrieved_at: "2026-07-24"
   max_examples: 500000
   output_dir: "./checkpoints/cpt"
   checkpoint: "./checkpoints/cpt_final"

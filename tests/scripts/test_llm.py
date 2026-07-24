@@ -164,6 +164,27 @@ class TestCallLlm:
         result = call_llm(cfg, [{"role": "user", "content": "hello"}])
         assert result is None
 
+    @pytest.mark.parametrize("content", [None, 123])
+    @responses.activate
+    def test_non_string_content_returns_none(self, monkeypatch: pytest.MonkeyPatch, content: object) -> None:
+        monkeypatch.setenv("X", "fake-key")
+        for _ in range(5):
+            responses.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                json={"choices": [{"message": {"content": content}}]},
+            )
+        from training.config import ApiConfigBase
+
+        cfg = ApiConfigBase(
+            endpoint="https://openrouter.ai/api/v1/chat/completions",
+            api_key_env="X",
+            model="test",
+            temperature=0.5,
+            max_tokens=100,
+            batch_size=10,
+        )
+        assert call_llm(cfg, []) is None
+
     @responses.activate
     def test_markdown_fences_stripped(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("X", "fake-key")

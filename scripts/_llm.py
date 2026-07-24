@@ -52,6 +52,8 @@ def call_llm(
             )
             response.raise_for_status()
             raw = response.json()["choices"][0]["message"]["content"]
+            if not isinstance(raw, str):
+                raise ValueError(f"Expected message content to be a string, got {type(raw).__name__}")
             result = json.loads(strip_outer_json_fence(raw))
             if expected_type is not None and not isinstance(result, expected_type):
                 raise ValueError(f"Expected {expected_type.__name__} response, got {type(result).__name__}")

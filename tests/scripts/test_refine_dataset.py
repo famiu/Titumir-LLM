@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from scripts._data import atomic_text_writer
 from scripts.refine_dataset import check_batch_with_retry, refine_dataset, refine_file
 from training.config import RefinementConfig
 
@@ -184,8 +186,80 @@ class TestRefineFile:
         assert len((refined_dir / "input.jsonl").read_text().splitlines()) == 4
         assert not state_file.exists()
 
+    def test_checkpoints_at_bounded_interval(self, tmp_path: pytest.TempPathFactory, sample_a_path: Path) -> None:
+        refined_dir = tmp_path / "refined"
+        removed_dir = tmp_path / "removed"
+        refined_dir.mkdir()
+        removed_dir.mkdir()
+        input_file = tmp_path / "input.jsonl"
+        examples = [json.loads(line) for line in open(sample_a_path)][:6]
+        input_file.write_text("".join(json.dumps(example) + "\n" for example in examples))
+        cfg = RefinementConfig(
+            endpoint="http://x",
+            api_key_env="X",
+            model="test",
+            temperature=0.1,
+            max_tokens=100,
+            batch_size=1,
+            max_workers=1,
+        )
+        writes = []
+
+        @contextmanager
+        def recording_writer(path):
+            writes.append(Path(path))
+            with atomic_text_writer(path) as file:
+                yield file
+
+        with (
+            patch("scripts.refine_dataset.CHECKPOINT_INTERVAL", 2),
+            patch("scripts.refine_dataset.atomic_text_writer", side_effect=recording_writer),
+            patch(
+                "scripts.refine_dataset.call_llm",
+                return_value={"keep": [0], "remove": [], "reasons": {}},
+            ),
+        ):
+            refine_file(input_file, str(refined_dir), str(removed_dir), cfg, "prompt", batch_size=1)
+
+        state_path = refined_dir / "input.jsonl.state.json"
+        assert sum(path == state_path for path in writes) == 3
+
 
 class TestRefineDataset:
+    def test_directory_resume_only_for_checkpointed_files(self, tmp_path: pytest.TempPathFactory) -> None:
+        unprocessed = tmp_path / "unprocessed"
+        refined = tmp_path / "refined"
+        removed = tmp_path / "removed"
+        unprocessed.mkdir()
+        refined.mkdir()
+        removed.mkdir()
+        for name in ("checkpointed.jsonl", "fresh.jsonl"):
+            (unprocessed / name).write_text("{}\n")
+        (refined / "checkpointed.jsonl.state.json").write_text("{}")
+        cfg = RefinementConfig(
+            endpoint="http://x",
+            api_key_env="X",
+            model="test",
+            temperature=0.1,
+            max_tokens=100,
+            batch_size=1,
+            prompt="check",
+        )
+
+        with (
+            patch("scripts.refine_dataset.load_config") as load_config,
+            patch("scripts.refine_dataset.refine_file") as refine_file_mock,
+        ):
+            config = load_config.return_value
+            config.profile.unprocessed_data_dir = str(unprocessed)
+            config.profile.refined_data_dir = str(refined)
+            config.profile.removed_data_dir = str(removed)
+            config.refinement = cfg
+            refine_dataset(resume=True)
+
+        resume_by_name = {call.args[0].name: call.kwargs["resume"] for call in refine_file_mock.call_args_list}
+        assert resume_by_name == {"checkpointed.jsonl": True, "fresh.jsonl": False}
+
     def test_already_refined_file_skipped(
         self, tmp_path: pytest.TempPathFactory, capsys: pytest.CaptureFixture
     ) -> None:

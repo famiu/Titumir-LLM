@@ -349,6 +349,19 @@ class TestRefinementConfig:
 
 
 class TestConfig:
+    @pytest.mark.parametrize("seed", [0, 4_294_967_295])
+    def test_seed_boundaries_valid(self, dummy_config: Config, seed: int) -> None:
+        data = dummy_config.model_dump()
+        data["seed"] = seed
+        assert Config.model_validate(data).seed == seed
+
+    @pytest.mark.parametrize("seed", [-1, 4_294_967_296])
+    def test_seed_out_of_range_raises(self, dummy_config: Config, seed: int) -> None:
+        data = dummy_config.model_dump()
+        data["seed"] = seed
+        with pytest.raises(ValidationError, match="seed"):
+            Config.model_validate(data)
+
     def test_empty_topics_with_generation_prompt_raises(self) -> None:
         cfg_dict = {
             "profile": {"name": "test", "data_root": "data"},
